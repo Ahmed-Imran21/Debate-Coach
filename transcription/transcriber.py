@@ -16,6 +16,7 @@ COMPUTE_TYPE = "int8"
 # Load Whisper model
 # --------------------------------------------------
 
+
 model = WhisperModel(
     MODEL_SIZE,
     device=DEVICE,
@@ -27,23 +28,40 @@ model = WhisperModel(
 # Transcription function
 # --------------------------------------------------
 
-def transcribe_audio(audio_path, output_path):
+def transcribe_audio(audio_path, session_id, output_directory):
     """
     Transcribe an audio file using faster-whisper.
 
     Parameters:
-        audio_path (str or Path): Path to the input WAV file.
-        output_path (str or Path): Path where the transcript JSON
-                                   should be saved.
+        audio_path (str or Path):
+            Path to the input WAV file.
+
+        session_id (str):
+            Unique ID belonging to this recording session.
+
+        output_directory (str or Path):
+            Directory where the transcript JSON should be saved.
 
     Returns:
-        dict: Structured transcript data.
+        tuple:
+            (session_id, transcript_path, transcript)
     """
 
     audio_path = Path(audio_path)
-    output_path = Path(output_path)
+    output_directory = Path(output_directory)
 
-    print(f"Transcribing: {audio_path}")
+    # Create the transcript directory if necessary
+    output_directory.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    # Create transcript filename using the session ID
+    output_path = output_directory / f"{session_id}.json"
+
+    print()
+    print(f"Transcribing session: {session_id}")
+    print(f"Audio file: {audio_path}")
 
     # Run Whisper
     segments, info = model.transcribe(
@@ -54,8 +72,9 @@ def transcribe_audio(audio_path, output_path):
     # Convert Whisper's generator into a list
     segments = list(segments)
 
-    # Store the complete transcript
+    # Create our structured transcript
     transcript = {
+        "session_id": session_id,
         "audio_file": str(audio_path),
         "language": info.language,
         "language_probability": info.language_probability,
@@ -72,7 +91,7 @@ def transcribe_audio(audio_path, output_path):
             "words": []
         }
 
-        # Store individual words
+        # Process individual words
         if segment.words is not None:
 
             for word in segment.words:
@@ -84,17 +103,15 @@ def transcribe_audio(audio_path, output_path):
                     "probability": word.probability
                 }
 
-                segment_data["words"].append(word_data)
+                segment_data["words"].append(
+                    word_data
+                )
 
-        transcript["segments"].append(segment_data)
+        transcript["segments"].append(
+            segment_data
+        )
 
-    # Make sure the output directory exists
-    output_path.parent.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-    # Save transcript as JSON
+    # Save transcript
     with open(
         output_path,
         "w",
@@ -108,9 +125,10 @@ def transcribe_audio(audio_path, output_path):
             ensure_ascii=False
         )
 
+    print()
     print(f"Transcript saved to: {output_path}")
 
-    return transcript
+    return session_id, output_path, transcript
 
 
 # --------------------------------------------------
@@ -119,15 +137,18 @@ def transcribe_audio(audio_path, output_path):
 
 if __name__ == "__main__":
 
+    session_id = "session_20260823_233450"
+
     audio_file = Path(
-        "audio/recordings/test_recording.wav"
+        f"audio/recordings/{session_id}.wav"
     )
 
-    transcript_file = Path(
-        "transcription/transcripts/test_transcript.json"
+    transcript_directory = Path(
+        "transcription/transcripts"
     )
 
     transcribe_audio(
         audio_path=audio_file,
-        output_path=transcript_file
+        session_id=session_id,
+        output_directory=transcript_directory
     )
