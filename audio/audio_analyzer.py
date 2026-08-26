@@ -30,7 +30,7 @@ print("Silero VAD model loaded.")
 # Analyze audio
 # ---------------------------------
 
-def analyze_audio(audio_path, session_id, output_directory):
+def analyze_audio(audio_path, session_id, session_directory):
     """
     Analyze an audio recording using Silero VAD.
 
@@ -41,8 +41,8 @@ def analyze_audio(audio_path, session_id, output_directory):
         session_id (str):
             Unique ID of the recording session.
 
-        output_directory (str or Path):
-            Directory where the analysis JSON will be saved.
+        session_directory (str or Path):
+            Directory belonging to the current debate session.
 
     Returns:
         tuple:
@@ -50,16 +50,16 @@ def analyze_audio(audio_path, session_id, output_directory):
     """
 
     audio_path = Path(audio_path)
-    output_directory = Path(output_directory)
+    session_directory = Path(session_directory)
 
-    output_directory.mkdir(
+    # Make sure the session directory exists
+    session_directory.mkdir(
         parents=True,
         exist_ok=True
     )
 
-    output_path = (
-        output_directory / f"{session_id}.json"
-    )
+    # Analysis belongs to this session
+    output_path = session_directory / "analysis.json"
 
     print()
     print(f"Analyzing session: {session_id}")
@@ -303,16 +303,14 @@ if __name__ == "__main__":
 
     session_id = "session_20260823_233450"
 
-    audio_file = Path(
-        f"audio/recordings/{session_id}.wav"
+    session_directory = Path(
+        f"sessions/{session_id}"
     )
 
-    analysis_directory = Path(
-        "audio/analysis"
-    )
+    audio_file = session_directory / "recording.wav"
 
     analyze_audio(
         audio_path=audio_file,
         session_id=session_id,
-        output_directory=analysis_directory
+        session_directory=session_directory
     )
