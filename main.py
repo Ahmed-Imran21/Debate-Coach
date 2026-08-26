@@ -62,7 +62,6 @@ def run_session():
     # ---------------------------------
 
     (
-        session_id,
         transcription_path,
         transcript
     ) = transcribe_audio(
@@ -79,10 +78,9 @@ def run_session():
     # ---------------------------------
 
     (
-        session_id,
-        analysis_path,
-        analysis
-    ) = analyze_audio(
+        transcription_path,
+        transcript
+    ) = transcribe_audio(
         audio_path=audio_path,
         session_id=session.session_id,
         session_directory=session.session_directory
