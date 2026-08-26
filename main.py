@@ -1,96 +1,135 @@
 from pathlib import Path
 
-from audio.recorder import record_audio
-from audio.audio_analyzer import analyze_audio
-from transcription.transcriber import transcribe_audio
-
-
-# ---------------------------------
-# Configuration
-# ---------------------------------
-
-RECORDINGS_DIRECTORY = Path(
-    "audio/recordings"
-)
-
-TRANSCRIPTS_DIRECTORY = Path(
-    "transcription/transcripts"
-)
-
-AUDIO_ANALYSIS_DIRECTORY = Path(
-    "audio/analysis"
-)
+from session_manager import SessionManager
+from recorder import record_audio
+from transcriber import transcribe_audio
+from audio_analyzer import analyze_audio
 
 
 # ---------------------------------
 # Main pipeline
 # ---------------------------------
 
-def run_debate_session():
+def run_session():
+    """
+    Run the complete debate session pipeline.
+
+    Pipeline:
+
+        1. Create session
+        2. Record audio
+        3. Transcribe audio
+        4. Analyze audio
+        5. Complete session
+    """
 
     print()
-    print("=" * 50)
-    print("           AI DEBATE COACH")
-    print("=" * 50)
+    print("==============================")
+    print("      AI DEBATE COACH")
+    print("==============================")
+
 
     # ---------------------------------
-    # Step 1: Record audio
+    # 1. Create session
     # ---------------------------------
+
+    session_manager = SessionManager()
+
+    session = session_manager.create_session()
 
     print()
-    print("STEP 1: RECORDING")
-    print("-" * 50)
-
-    session_id, audio_path = record_audio(
-        output_directory=RECORDINGS_DIRECTORY
+    print(
+        f"Starting session: "
+        f"{session.session_id}"
     )
 
+
     # ---------------------------------
-    # Step 2: Transcribe audio
+    # 2. Record audio
     # ---------------------------------
 
-    print()
-    print("STEP 2: TRANSCRIPTION")
-    print("-" * 50)
+    session.start()
 
-    session_id, transcript_path, transcript = (
-        transcribe_audio(
-            audio_path=audio_path,
-            session_id=session_id,
-            output_directory=TRANSCRIPTS_DIRECTORY
-        )
+    audio_path = record_audio(
+        session_directory=session.session_directory
     )
 
+    session.finish_recording()
+
+
     # ---------------------------------
-    # Step 3: Analyze audio
+    # 3. Transcribe audio
     # ---------------------------------
 
-    print()
-    print("STEP 3: AUDIO ANALYSIS")
-    print("-" * 50)
-
-    session_id, audio_analysis_path, audio_analysis = (
-        analyze_audio(
-            audio_path=audio_path,
-            session_id=session_id,
-            output_directory=AUDIO_ANALYSIS_DIRECTORY
-        )
+    (
+        session_id,
+        transcription_path,
+        transcript
+    ) = transcribe_audio(
+        audio_path=audio_path,
+        session_id=session.session_id,
+        session_directory=session.session_directory
     )
 
+    session.finish_transcription()
+
+
     # ---------------------------------
-    # Step 4: Session complete
+    # 4. Analyze audio
+    # ---------------------------------
+
+    (
+        session_id,
+        analysis_path,
+        analysis
+    ) = analyze_audio(
+        audio_path=audio_path,
+        session_id=session.session_id,
+        session_directory=session.session_directory
+    )
+
+    session.finish_analysis()
+
+
+    # ---------------------------------
+    # 5. Complete session
+    # ---------------------------------
+
+    session.complete()
+
+
+    # ---------------------------------
+    # Pipeline complete
     # ---------------------------------
 
     print()
-    print("=" * 50)
-    print("           SESSION COMPLETE")
-    print("=" * 50)
+    print("==============================")
+    print("       SESSION COMPLETE")
+    print("==============================")
 
     print()
-    print(f"Session ID:       {session_id}")
-    print(f"Audio file:       {audio_path}")
-    print(f"Transcript file:  {transcript_path}")
-    print(f"Audio analysis:   {audio_analysis_path}")
+    print(f"Session ID: {session.session_id}")
+    print(f"Status: {session.status}")
+    print(f"Session directory: {session.session_directory}")
+
+    print()
+    print("Files created:")
+
+    print(
+        f"  Recording:     "
+        f"{session.audio_path}"
+    )
+
+    print(
+        f"  Transcription: "
+        f"{session.transcription_path}"
+    )
+
+    print(
+        f"  Analysis:      "
+        f"{session.analysis_path}"
+    )
+
     print()
 
 
@@ -99,4 +138,5 @@ def run_debate_session():
 # ---------------------------------
 
 if __name__ == "__main__":
-    run_debate_session()
+
+    run_session()
