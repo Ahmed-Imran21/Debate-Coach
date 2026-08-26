@@ -1,0 +1,17 @@
+{
+    "session_id": "session_20260823_233450",
+    "audio_file": "audio/recordings/session_20260823_233450.wav",
+    "sample_rate": 16000,
+    "total_duration": 12.4,
+    "speech_duration": 10.876,
+    "silence_duration": 1.524000000000001,
+    "speech_percentage": 87.70967741935483,
+    "speech_segments": [
+        {
+            "start": 0.962,
+            "end": 11.838,
+            "duration": 10.876
+        }
+    ],
+    "pauses": []
+}
