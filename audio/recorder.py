@@ -3,7 +3,6 @@ import soundfile as sf
 import numpy as np
 
 from pathlib import Path
-from datetime import datetime
 import threading
 
 
@@ -20,33 +19,30 @@ DTYPE = "float32"
 # Recording function
 # -----------------------------
 
-def record_audio(output_directory):
+def record_audio(session_directory):
     """
     Record audio until the user presses Enter.
 
     Parameters:
-        output_directory (str or Path):
-            Directory where the WAV file should be saved.
+        session_directory (str or Path):
+            Directory belonging to the current debate session.
 
     Returns:
-        tuple:
-            (session_id, audio_path)
+        Path:
+            Path to the recorded WAV file.
     """
 
-    # Generate a unique ID for this recording session
-    session_id = datetime.now().strftime(
-        "session_%Y%m%d_%H%M%S"
-    )
+    # Convert the session directory to a Path object
+    session_directory = Path(session_directory)
 
-    # Make sure the recordings directory exists
-    output_directory = Path(output_directory)
-    output_directory.mkdir(
+    # Make sure the session directory exists
+    session_directory.mkdir(
         parents=True,
         exist_ok=True
     )
 
-    # Create the filename using the session ID
-    output_file = output_directory / f"{session_id}.wav"
+    # The recording belongs to this session
+    output_file = session_directory / "recording.wav"
 
     print()
     print("Press ENTER to start recording.")
@@ -119,9 +115,8 @@ def record_audio(output_directory):
     )
 
     print(f"Audio saved to: {output_file}")
-    print(f"Session ID: {session_id}")
 
-    return session_id, output_file
+    return output_file
 
 
 # -----------------------------
@@ -130,11 +125,10 @@ def record_audio(output_directory):
 
 if __name__ == "__main__":
 
-    recordings_directory = Path(
-        "audio/recordings"
+    test_session_directory = Path(
+        "sessions/test_session"
     )
 
     record_audio(
-        output_directory=recordings_directory
+        session_directory=test_session_directory
     )
-    
