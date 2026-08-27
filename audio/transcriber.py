@@ -16,7 +16,6 @@ COMPUTE_TYPE = "int8"
 # Load Whisper model
 # --------------------------------------------------
 
-
 model = WhisperModel(
     MODEL_SIZE,
     device=DEVICE,
@@ -28,7 +27,7 @@ model = WhisperModel(
 # Transcription function
 # --------------------------------------------------
 
-def transcribe_audio(audio_path, session_id, output_directory):
+def transcribe_audio(audio_path, session_id, session_directory):
     """
     Transcribe an audio file using faster-whisper.
 
@@ -39,25 +38,25 @@ def transcribe_audio(audio_path, session_id, output_directory):
         session_id (str):
             Unique ID belonging to this recording session.
 
-        output_directory (str or Path):
-            Directory where the transcript JSON should be saved.
+        session_directory (str or Path):
+            Directory belonging to the current debate session.
 
     Returns:
         tuple:
-            (session_id, transcript_path, transcript)
+            (transcript_path, transcript)
     """
 
     audio_path = Path(audio_path)
-    output_directory = Path(output_directory)
+    session_directory = Path(session_directory)
 
-    # Create the transcript directory if necessary
-    output_directory.mkdir(
+    # Make sure the session directory exists
+    session_directory.mkdir(
         parents=True,
         exist_ok=True
     )
 
-    # Create transcript filename using the session ID
-    output_path = output_directory / f"{session_id}.json"
+    # Transcript belongs to this session
+    output_path = session_directory / "transcription.json"
 
     print()
     print(f"Transcribing session: {session_id}")
@@ -128,7 +127,7 @@ def transcribe_audio(audio_path, session_id, output_directory):
     print()
     print(f"Transcript saved to: {output_path}")
 
-    return session_id, output_path, transcript
+    return output_path, transcript
 
 
 # --------------------------------------------------
@@ -139,16 +138,14 @@ if __name__ == "__main__":
 
     session_id = "session_20260823_233450"
 
-    audio_file = Path(
-        f"audio/recordings/{session_id}.wav"
+    session_directory = Path(
+        f"sessions/{session_id}"
     )
 
-    transcript_directory = Path(
-        "transcription/transcripts"
-    )
+    audio_file = session_directory / "recording.wav"
 
     transcribe_audio(
         audio_path=audio_file,
         session_id=session_id,
-        output_directory=transcript_directory
+        session_directory=session_directory
     )
