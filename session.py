@@ -113,6 +113,63 @@ class Session:
                 indent=4
             )
 
+
+
+
+    # ---------------------------------
+    # Load session
+    # ---------------------------------
+
+    @classmethod
+    def load(cls, session_id, base_directory="sessions"):
+        """
+        Load an existing session from session.json.
+
+        Parameters:
+            session_id (str):
+                ID of the session to load.
+
+            base_directory (str or Path):
+                Root directory where all sessions are stored.
+
+        Returns:
+            Session:
+                Session object reconstructed from session.json.
+        """
+
+        # Create a Session object using the session ID
+        session = cls(
+            session_id=session_id,
+            base_directory=base_directory
+        )
+
+        # Make sure session.json exists
+        if not session.session_json_path.exists():
+
+            raise FileNotFoundError(
+                f"session.json for session "
+                f"'{session_id}' does not exist."
+            )
+
+        # Open session.json
+        with open(
+            session.session_json_path,
+            "r",
+            encoding="utf-8"
+        ) as file:
+
+            session_data = json.load(file)
+
+        # Restore the saved creation time
+        session.created_at = datetime.fromisoformat(
+            session_data["created_at"]
+        )
+
+        # Restore the saved status
+        session.status = session_data["status"]
+
+        return session
+
     # ---------------------------------
     # Status
     # ---------------------------------
