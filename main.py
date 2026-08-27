@@ -1,9 +1,9 @@
 from pathlib import Path
 
 from session_manager import SessionManager
-from recorder import record_audio
-from transcriber import transcribe_audio
-from audio_analyzer import analyze_audio
+from audio.recorder import record_audio
+from audio.transcriber import transcribe_audio
+from audio.audio_analyzer import analyze_audio
 
 
 # ---------------------------------
@@ -78,9 +78,9 @@ def run_session():
     # ---------------------------------
 
     (
-        transcription_path,
-        transcript
-    ) = transcribe_audio(
+        analysis_path,
+        analysis
+    ) = analyze_audio(
         audio_path=audio_path,
         session_id=session.session_id,
         session_directory=session.session_directory

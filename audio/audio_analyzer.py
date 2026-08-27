@@ -46,7 +46,7 @@ def analyze_audio(audio_path, session_id, session_directory):
 
     Returns:
         tuple:
-            (session_id, output_path, analysis)
+            (output_path, analysis)
     """
 
     audio_path = Path(audio_path)
@@ -216,7 +216,6 @@ def analyze_audio(audio_path, session_id, session_directory):
     )
 
     return (
-        session_id,
         output_path,
         analysis
     )
