@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import datetime
+import json
 
 
 class Session:
@@ -51,6 +52,11 @@ class Session:
             self.session_directory / "analysis.json"
         )
 
+        # Session metadata file
+        self.session_json_path = (
+            self.session_directory / "session.json"
+        )
+
         # Session information
         self.created_at = datetime.now()
 
@@ -71,6 +77,43 @@ class Session:
         )
 
     # ---------------------------------
+    # Save session metadata
+    # ---------------------------------
+
+    def save(self):
+        """
+        Save the current session metadata to session.json.
+        """
+
+        session_data = {
+            "session_id": self.session_id,
+
+            "created_at": (
+                self.created_at.isoformat()
+            ),
+
+            "status": self.status,
+
+            "files": {
+                "audio": self.audio_path.name,
+                "transcription": self.transcription_path.name,
+                "analysis": self.analysis_path.name
+            }
+        }
+
+        with open(
+            self.session_json_path,
+            "w",
+            encoding="utf-8"
+        ) as file:
+
+            json.dump(
+                session_data,
+                file,
+                indent=4
+            )
+
+    # ---------------------------------
     # Status
     # ---------------------------------
 
@@ -81,12 +124,16 @@ class Session:
 
         self.status = "recording"
 
+        self.save()
+
     def finish_recording(self):
         """
         Mark recording as completed.
         """
 
         self.status = "recorded"
+
+        self.save()
 
     def finish_transcription(self):
         """
@@ -95,6 +142,8 @@ class Session:
 
         self.status = "transcribed"
 
+        self.save()
+
     def finish_analysis(self):
         """
         Mark analysis as completed.
@@ -102,12 +151,16 @@ class Session:
 
         self.status = "analyzed"
 
+        self.save()
+
     def complete(self):
         """
         Mark the entire session as completed.
         """
 
         self.status = "completed"
+
+        self.save()
 
     # ---------------------------------
     # Representation
@@ -138,14 +191,27 @@ if __name__ == "__main__":
 
     session.create_directory()
 
+    # Save initial session metadata
+    session.save()
+
     print()
     print("Session created:")
     print(session)
 
     print()
     print(f"Session ID: {session.session_id}")
-    print(f"Session directory: {session.session_directory}")
-    print(f"Audio path: {session.audio_path}")
+    print(
+        f"Session directory: "
+        f"{session.session_directory}"
+    )
+    print(
+        f"Session JSON: "
+        f"{session.session_json_path}"
+    )
+    print(
+        f"Audio path: "
+        f"{session.audio_path}"
+    )
     print(
         f"Transcription path: "
         f"{session.transcription_path}"

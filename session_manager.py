@@ -53,6 +53,9 @@ class SessionManager:
         # Create the session's directory
         session.create_directory()
 
+        # Save initial session metadata
+        session.save()
+
         print()
         print("New session created.")
         print(f"Session ID: {session.session_id}")
@@ -66,6 +69,7 @@ class SessionManager:
     # ---------------------------------
     # Load existing session
     # ---------------------------------
+
 
     def load_session(self, session_id):
         """
@@ -81,7 +85,8 @@ class SessionManager:
 
         Raises:
             FileNotFoundError:
-                If the session directory does not exist.
+                If the session directory or session.json
+                does not exist.
         """
 
         session_directory = (
@@ -95,7 +100,8 @@ class SessionManager:
                 f"does not exist."
             )
 
-        session = Session(
+        # Load the session from its saved metadata
+        session = Session.load(
             session_id=session_id,
             base_directory=self.base_directory
         )
@@ -151,6 +157,54 @@ class SessionManager:
 
         return sessions
 
+
+
+
+@classmethod
+def load(cls, session_id, base_directory="sessions"):
+    """
+    Load an existing session from session.json.
+
+    Parameters:
+        session_id (str):
+            ID of the session to load.
+
+        base_directory (str or Path):
+            Root directory where all sessions are stored.
+
+    Returns:
+        Session:
+            Session object reconstructed from session.json.
+    """
+
+    session = cls(
+        session_id=session_id,
+        base_directory=base_directory
+    )
+
+    if not session.session_json_path.exists():
+
+        raise FileNotFoundError(
+            f"session.json for session "
+            f"'{session_id}' does not exist."
+        )
+
+    with open(
+        session.session_json_path,
+        "r",
+        encoding="utf-8"
+    ) as file:
+
+        session_data = json.load(file)
+
+    # Restore saved session information
+    session.created_at = datetime.fromisoformat(
+        session_data["created_at"]
+    )
+
+    session.status = session_data["status"]
+
+    return session
 
 # ---------------------------------
 # Test Session Manager
