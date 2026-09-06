@@ -68,13 +68,4 @@ class LLMClient:
                 "LLM returned no structured response."
             )
 
-        result = response.output_parsed
-
-        if result.session_id != session_id:
-            raise ValueError(
-                "LLM returned an incorrect session_id. "
-                f"Expected '{session_id}', "
-                f"got '{result.session_id}'."
-            )
-
-        return result
+        return response.output_parsed

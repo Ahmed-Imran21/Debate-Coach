@@ -6,7 +6,7 @@ from .schemas import SpeechAnalysisResponse
 # Parse LLM response
 # ---------------------------------------------------------
 
-def parse_analysis_response(response):
+def parse_analysis_response(response, session_id):
     """
     Convert a validated LLM response into a SpeechContent
     object used by the rest of the application.
@@ -15,6 +15,9 @@ def parse_analysis_response(response):
     ----------
     response : SpeechAnalysisResponse
         Structured and validated response from the LLM.
+
+    session_id : str
+        ID of the session being analyzed.
 
     Returns
     -------
@@ -27,8 +30,13 @@ def parse_analysis_response(response):
             "response must be a SpeechAnalysisResponse instance."
         )
 
+    if not session_id:
+        raise ValueError(
+            "session_id cannot be empty."
+        )
+
     speech_content = SpeechContent(
-        session_id=response.session_id
+        session_id=session_id
     )
 
     for semantic_segment in response.segments:
@@ -82,7 +90,7 @@ def validate_segment_order(speech_content):
 # Parse and validate
 # ---------------------------------------------------------
 
-def parse_and_validate(response):
+def parse_and_validate(response, session_id):
     """
     Convert the LLM response into SpeechContent and perform
     additional project-level validation.
@@ -91,13 +99,19 @@ def parse_and_validate(response):
     ----------
     response : SpeechAnalysisResponse
 
+    session_id : str
+        ID of the session being analyzed.
+
     Returns
     -------
     SpeechContent
         Validated semantic analysis.
     """
 
-    speech_content = parse_analysis_response(response)
+    speech_content = parse_analysis_response(
+        response,
+        session_id
+    )
 
     validate_segment_order(speech_content)
 
