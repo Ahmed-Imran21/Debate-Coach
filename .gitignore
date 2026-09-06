@@ -1,2 +1,13 @@
 sessions/*
 !sessions/.gitkeep
+
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# API keys / secret configuration
+*.key
+*.pem
+secrets.json
+config.local.json

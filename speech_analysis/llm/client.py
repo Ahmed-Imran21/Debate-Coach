@@ -1,9 +1,17 @@
 import os
 
+from dotenv import load_dotenv
 from openai import OpenAI
 
 from .schemas import SpeechAnalysisResponse
 from .prompts import SYSTEM_PROMPT, build_analysis_prompt
+
+
+# ---------------------------------------------------------
+# Load environment variables
+# ---------------------------------------------------------
+
+load_dotenv()
 
 
 # ---------------------------------------------------------
@@ -14,7 +22,6 @@ MODEL_NAME = os.getenv(
     "DEBATE_COACH_MODEL",
     "gpt-4o-mini"
 )
-
 
 # ---------------------------------------------------------
 # LLM Client

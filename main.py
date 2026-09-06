@@ -1,140 +1,112 @@
-from pathlib import Path
-
 from session_manager import SessionManager
 from audio.recorder import record_audio
 from audio.transcriber import transcribe_audio
 from audio.audio_analyzer import analyze_audio
+from raw_metrics.metrics import analyze_metrics
 
-
-# ---------------------------------
-# Main pipeline
-# ---------------------------------
 
 def run_session():
     """
-    Run the complete debate session pipeline.
+    Run a complete Debate Coach session.
 
     Pipeline:
-
         1. Create session
         2. Record audio
         3. Transcribe audio
         4. Analyze audio
-        5. Complete session
+        5. Calculate raw speech metrics
+        6. Complete session
     """
 
-    print()
-    print("==============================")
-    print("      AI DEBATE COACH")
-    print("==============================")
-
-
-    # ---------------------------------
+    # ---------------------------------------------------------
     # 1. Create session
-    # ---------------------------------
+    # ---------------------------------------------------------
 
-    session_manager = SessionManager()
+    manager = SessionManager()
 
-    session = session_manager.create_session()
+    session = manager.create_session()
 
-    print()
-    print(
-        f"Starting session: "
-        f"{session.session_id}"
-    )
-
-
-    # ---------------------------------
-    # 2. Record audio
-    # ---------------------------------
+    print(f"\nSession created: {session.session_id}")
+    print(f"Session directory: {session.session_directory}")
 
     session.start()
 
-    audio_path = record_audio(
-        session_directory=session.session_directory
+    # ---------------------------------------------------------
+    # 2. Record audio
+    # ---------------------------------------------------------
+
+    print("\nStarting recording...")
+
+    record_audio(
+        session.audio_path
     )
 
     session.finish_recording()
 
+    print(f"Recording saved to: {session.audio_path}")
 
-    # ---------------------------------
+    # ---------------------------------------------------------
     # 3. Transcribe audio
-    # ---------------------------------
+    # ---------------------------------------------------------
 
-    (
-        transcription_path,
-        transcript
-    ) = transcribe_audio(
-        audio_path=audio_path,
-        session_id=session.session_id,
-        session_directory=session.session_directory
+    print("\nTranscribing audio...")
+
+    transcription_path, transcription = transcribe_audio(
+        session.audio_path,
+        session.session_id,
+        session.session_directory
     )
 
     session.finish_transcription()
 
+    print(f"Transcription saved to: {transcription_path}")
 
-    # ---------------------------------
+    # ---------------------------------------------------------
     # 4. Analyze audio
-    # ---------------------------------
+    # ---------------------------------------------------------
 
-    (
-        analysis_path,
-        analysis
-    ) = analyze_audio(
-        audio_path=audio_path,
-        session_id=session.session_id,
-        session_directory=session.session_directory
+    print("\nAnalyzing audio...")
+
+    analysis_path, analysis = analyze_audio(
+        session.audio_path,
+        session.session_id,
+        session.session_directory
     )
 
     session.finish_analysis()
 
+    print(f"Audio analysis saved to: {analysis_path}")
 
-    # ---------------------------------
-    # 5. Complete session
-    # ---------------------------------
+    # ---------------------------------------------------------
+    # 5. Calculate raw speech metrics
+    # ---------------------------------------------------------
+
+    print("\nCalculating raw speech metrics...")
+
+    raw_metrics_path, raw_metrics = analyze_metrics(
+        session.session_id,
+        session.session_directory
+    )
+
+    print(f"Raw metrics saved to: {raw_metrics_path}")
+
+    # ---------------------------------------------------------
+    # 6. Complete session
+    # ---------------------------------------------------------
 
     session.complete()
 
+    print("\n========================================")
+    print("SESSION COMPLETED")
+    print("========================================")
+    print(f"Session ID:       {session.session_id}")
+    print(f"Session directory:{session.session_directory}")
+    print(f"Audio:            {session.audio_path}")
+    print(f"Transcription:    {session.transcription_path}")
+    print(f"Audio analysis:   {session.analysis_path}")
+    print(f"Raw metrics:      {raw_metrics_path}")
+    print("========================================\n")
 
-    # ---------------------------------
-    # Pipeline complete
-    # ---------------------------------
-
-    print()
-    print("==============================")
-    print("       SESSION COMPLETE")
-    print("==============================")
-
-    print()
-    print(f"Session ID: {session.session_id}")
-    print(f"Status: {session.status}")
-    print(f"Session directory: {session.session_directory}")
-
-    print()
-    print("Files created:")
-
-    print(
-        f"  Recording:     "
-        f"{session.audio_path}"
-    )
-
-    print(
-        f"  Transcription: "
-        f"{session.transcription_path}"
-    )
-
-    print(
-        f"  Analysis:      "
-        f"{session.analysis_path}"
-    )
-
-    print()
-
-
-# ---------------------------------
-# Program entry point
-# ---------------------------------
 
 if __name__ == "__main__":
-
     run_session()
