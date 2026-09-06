@@ -193,12 +193,6 @@ def analyze_metrics(session_id, session_directory):
 
 
 if __name__ == "__main__":
-    """
-    Simple manual test.
-    """
-
-    session_id = "session_20260828_171345"
-    session_directory = Path("sessions") / session_id
 
     output_path, metrics = analyze_metrics(
         session_id,
