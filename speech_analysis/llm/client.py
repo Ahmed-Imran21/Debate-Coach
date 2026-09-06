@@ -7,87 +7,44 @@ from .schemas import SpeechAnalysisResponse
 from .prompts import SYSTEM_PROMPT, build_analysis_prompt
 
 
-# ---------------------------------------------------------
-# Load environment variables
-# ---------------------------------------------------------
-
 load_dotenv()
-
-
-# ---------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------
 
 MODEL_NAME = os.getenv(
     "DEBATE_COACH_MODEL",
-    "gpt-4o-mini"
+    "openai/gpt-oss-120b"
 )
 
-# ---------------------------------------------------------
-# LLM Client
-# ---------------------------------------------------------
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
 
 class LLMClient:
-    """
-    Handles communication with the LLM API.
-    """
-
     def __init__(self):
-        """
-        Initialize the LLM client.
-
-        The API key is read from the OPENAI_API_KEY
-        environment variable.
-        """
-
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = os.getenv("GROQ_API_KEY")
 
         if not api_key:
             raise ValueError(
-                "OPENAI_API_KEY environment variable is not set."
+                "GROQ_API_KEY environment variable is not set."
             )
 
-        self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=GROQ_BASE_URL
+        )
+
         self.model = MODEL_NAME
 
-    # -----------------------------------------------------
-    # Semantic analysis
-    # -----------------------------------------------------
-
     def analyze_speech(self, session_id, transcript):
-        """
-        Analyze a transcript using the LLM.
-
-        Parameters
-        ----------
-        session_id : str
-            ID of the current debate session.
-
-        transcript : str
-            Transcript to analyze.
-
-        Returns
-        -------
-        SpeechAnalysisResponse
-            Validated semantic analysis.
-        """
-
         if not session_id:
-            raise ValueError(
-                "session_id cannot be empty."
-            )
+            raise ValueError("session_id cannot be empty.")
 
         if not transcript or not transcript.strip():
-            raise ValueError(
-                "transcript cannot be empty."
-            )
+            raise ValueError("transcript cannot be empty.")
 
         prompt = build_analysis_prompt(transcript)
 
         try:
             response = self.client.responses.parse(
                 model=self.model,
-
                 input=[
                     {
                         "role": "system",
@@ -98,7 +55,6 @@ class LLMClient:
                         "content": prompt,
                     },
                 ],
-
                 text_format=SpeechAnalysisResponse,
             )
 
@@ -113,10 +69,6 @@ class LLMClient:
             )
 
         result = response.output_parsed
-
-        # -------------------------------------------------
-        # Verify session ID
-        # -------------------------------------------------
 
         if result.session_id != session_id:
             raise ValueError(

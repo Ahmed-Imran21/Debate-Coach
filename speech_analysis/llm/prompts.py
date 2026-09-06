@@ -217,18 +217,18 @@ Return ONLY valid JSON.
 
 The JSON must follow this structure:
 
-{
+{{
     "session_id": "string",
     "segments": [
-        {
+        {{
             "start": 0.0,
             "end": 5.0,
             "text": "exact transcript text",
             "labels": ["claim"],
             "fallacy_type": null
-        }
+        }}
     ]
-}
+}}
 
 Requirements:
 
