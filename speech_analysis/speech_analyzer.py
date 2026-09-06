@@ -210,7 +210,8 @@ def analyze_speech(session_id, session_directory):
     print("Parsing LLM response...")
 
     speech_content = parse_and_validate(
-        response
+        response,
+        session_id
     )
 
     # -----------------------------------------------------
