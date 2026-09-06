@@ -127,12 +127,8 @@ class SemanticSegment(BaseModel):
 
 class SpeechAnalysisResponse(BaseModel):
     """
-    Complete structured response returned by the LLM.
+    Structured semantic analysis returned by the LLM.
     """
-
-    session_id: str = Field(
-        description="ID of the session being analyzed."
-    )
 
     segments: List[SemanticSegment] = Field(
         default_factory=list,
