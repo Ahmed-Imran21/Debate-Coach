@@ -43,7 +43,7 @@ def run_session():
     print("\nStarting recording...")
 
     record_audio(
-        session.audio_path
+        session.session_directory
     )
 
     session.finish_recording()
