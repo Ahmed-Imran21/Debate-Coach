@@ -1,7 +1,107 @@
 sessions/*
 !sessions/.gitkeep
 
-# Environment variables / secrets
+# ==========================================
+# Python
+# ==========================================
+
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python packaging
+*.egg-info/
+.eggs/
+*.egg
+MANIFEST
+
+# Build output
+build/
+dist/
+wheels/
+
+
+# ==========================================
+# Virtual Environments / Conda
+# ==========================================
+
+.venv/
+venv/
+env/
+ENV/
+
+.conda/
+conda-env/
+*.conda/
+
+
+# ==========================================
+# Environment Variables / Secrets
+# ==========================================
+
 .env
 .env.*
 !.env.example
+
+# API keys / credentials
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# ==========================================
+# Testing / Coverage
+# ==========================================
+
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.pyre/
+.mypy_cache/
+.ruff_cache/
+
+
+# ==========================================
+# Jupyter
+# ==========================================
+
+.ipynb_checkpoints/
+
+
+# ==========================================
+# VS Code
+# ==========================================
+
+.vscode/
+
+
+# ==========================================
+# Other IDEs
+# ==========================================
+
+.idea/
+*.iml
+
+
+# ==========================================
+# OS Clutter
+# ==========================================
+
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+
+# ==========================================
+# Temporary Files
+# ==========================================
+
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
