@@ -3,120 +3,174 @@ from typing import Any, Dict
 
 
 SYSTEM_PROMPT = """
-You are an expert debate coach.
+You are an expert debate coach analyzing a speaker's debate performance.
 
-Your task is to analyze a speaker's debate performance and provide
-specific, evidence-based coaching feedback.
+Your task is to provide specific, evidence-based coaching feedback.
 
-You must:
+Rules:
+
 - Base your analysis only on the information provided.
-- Do not invent statements that are not present in the speech.
-- Distinguish between observations and interpretations.
-- Identify specific weaknesses and explain how they affect the argument.
+- Never invent statements, arguments, evidence, or opposing positions.
+- Distinguish observations from interpretations.
+- Identify specific strengths or weaknesses.
+- Explain why an issue matters to debate performance.
 - Give practical recommendations that the speaker can apply.
-- Be concise but useful.
-- Do not evaluate speaking speed, pauses, fillers, or stutters.
-  Those are handled separately by the quantitative analysis.
-- Focus on qualitative aspects of debate performance.
+- Keep feedback concise but useful.
+- Focus only on qualitative debate performance.
+- Do NOT evaluate speaking speed, pauses, fillers, or stutters.
+- Those aspects are handled separately by the quantitative analysis.
+- Use the provided semantic labels as evidence.
+- Do not assume relationships between claims and evidence that are
+  not represented in the input.
+- Do not independently invent logical fallacies.
+- If a detected fallacy is present, explain its possible impact rather
+  than claiming more than the data supports.
 
-Return your response as valid JSON only.
-
-The JSON must contain a top-level object with a key called "feedback".
-"feedback" must be a list of feedback objects.
-
-Each feedback object must contain:
-
-{
-    "category": "argumentation | rebuttal | structure | persuasion | logic",
-    "title": "short descriptive title",
-    "issue": "specific problem or observation",
-    "severity": "high | medium | low | positive",
-    "evidence": ["exact or short excerpts from the speech"],
-    "explanation": "why this matters",
-    "recommendation": "specific advice for improvement",
-    "metadata": {}
-}
-
-Do not include markdown.
-Do not wrap the JSON in ```json fences.
+You must return only the structured response requested by the schema.
 """
 
 
-def build_qualitative_prompt(
-    category: str,
-    speech_content: Dict[str, Any],
-) -> str:
-    """
-    Build a prompt for qualitative analysis of a debate speech.
+# -------------------------------------------------------------------
+# Structured output schema
+# -------------------------------------------------------------------
 
-    Args:
-        category:
-            The qualitative category being analyzed.
+FEEDBACK_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "feedback": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "enum": [
+                            "argumentation",
+                            "rebuttal",
+                            "structure",
+                            "persuasion",
+                            "logic",
+                        ],
+                    },
+                    "title": {
+                        "type": "string",
+                    },
+                    "issue": {
+                        "type": "string",
+                    },
+                    "severity": {
+                        "type": "string",
+                        "enum": [
+                            "high",
+                            "medium",
+                            "low",
+                            "positive",
+                        ],
+                    },
+                    "evidence": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                        },
+                    },
+                    "explanation": {
+                        "type": "string",
+                    },
+                    "recommendation": {
+                        "type": "string",
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "additionalProperties": True,
+                    },
+                },
+                "required": [
+                    "category",
+                    "title",
+                    "issue",
+                    "severity",
+                    "evidence",
+                    "explanation",
+                    "recommendation",
+                    "metadata",
+                ],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": [
+        "feedback",
+    ],
+    "additionalProperties": False,
+}
 
-        speech_content:
-            Semantic speech analysis containing classified segments.
 
-    Returns:
-        A prompt string for the LLM.
-    """
+# -------------------------------------------------------------------
+# Category-specific instructions
+# -------------------------------------------------------------------
 
-    if not category.strip():
-        raise ValueError("category cannot be empty.")
-
-    if not isinstance(speech_content, dict):
-        raise TypeError("speech_content must be a dictionary.")
-
-    category_instructions = {
-        "argumentation": """
+CATEGORY_INSTRUCTIONS = {
+    "argumentation": """
 Evaluate the speaker's argumentation.
 
 Focus on:
+
 - clarity of claims
 - development of arguments
 - quality of reasoning
 - use of supporting evidence
+- use of examples
 - whether important claims appear unsupported
 - development of ideas
 - strength of argumentative support
+- clarity of conclusions
 
 Do not claim that a specific claim is unsupported merely because
 the data does not explicitly connect claims to evidence.
+
+Look for both strengths and weaknesses where appropriate.
 """,
 
-        "rebuttal": """
+    "rebuttal": """
 Evaluate the speaker's rebuttal technique.
 
 Focus on:
+
 - identification of opposing arguments
 - directness of responses
 - quality of rebuttals
-- use of reasoning against opposing positions
-- use of evidence in rebuttals
+- reasoning used against opposing positions
+- evidence used in rebuttals
 - concessions
 - whether the speaker actually engages with opposing reasoning
+- whether rebuttals appear relevant to the opposing position
 
 Do not invent an opposing argument that is not present in the data.
 """,
 
-        "structure": """
+    "structure": """
 Evaluate the organization and structure of the speech.
 
 Focus on:
+
 - clarity of the main position
 - progression of arguments
+- organization of ideas
 - transitions between ideas
 - relationship between claims, reasoning, and evidence
 - placement of rebuttals
 - conclusions
 - overall coherence
+- whether the speech develops in a logical sequence
 
 Do not infer exact relationships that are not represented in the input.
 """,
 
-        "persuasion": """
+    "persuasion": """
 Evaluate the persuasive effectiveness of the speech.
 
 Focus on:
+
 - clarity of the speaker's position
 - strength of supporting reasoning
 - use of evidence
@@ -124,15 +178,18 @@ Focus on:
 - engagement with opposing views
 - concessions
 - conclusions
-- credibility and convincingness of the presented reasoning
+- credibility of the presented reasoning
+- how convincing the argument appears based on the available evidence
 
-Do not evaluate vocal delivery metrics such as speaking speed or pauses.
+Do not evaluate vocal delivery metrics such as speaking speed,
+pauses, fillers, or stutters.
 """,
 
-        "logic": """
+    "logic": """
 Evaluate the logical quality of the speech.
 
 Focus on:
+
 - reasoning
 - connections between claims and supporting points
 - unsupported assertions
@@ -142,12 +199,54 @@ Focus on:
 - detected logical fallacies
 - conclusions
 
-Do not independently invent logical fallacies. Use detected fallacy
-information when available and explain its possible impact.
-""",
-    }
+Do not independently invent logical fallacies.
 
-    instructions = category_instructions.get(category)
+If a segment is explicitly labeled as a logical fallacy, use that
+information and explain its possible impact on the argument.
+
+Do not claim that an argument is logically invalid unless the
+provided information supports that conclusion.
+""",
+}
+
+
+def build_qualitative_prompt(
+    category: str,
+    speech_content: Dict[str, Any],
+) -> str:
+    """
+    Build a category-specific prompt for qualitative debate analysis.
+
+    Args:
+        category:
+            One of the supported qualitative categories.
+
+        speech_content:
+            Semantic speech analysis produced by the previous
+            pipeline stage.
+
+    Returns:
+        A prompt string for the LLM.
+    """
+
+    if not isinstance(category, str):
+        raise TypeError(
+            "category must be a string."
+        )
+
+    if not category.strip():
+        raise ValueError(
+            "category cannot be empty."
+        )
+
+    if not isinstance(speech_content, dict):
+        raise TypeError(
+            "speech_content must be a dictionary."
+        )
+
+    category = category.strip().lower()
+
+    instructions = CATEGORY_INSTRUCTIONS.get(category)
 
     if instructions is None:
         raise ValueError(
@@ -172,5 +271,18 @@ CATEGORY-SPECIFIC INSTRUCTIONS:
 SEMANTIC SPEECH DATA:
 {speech_json}
 
-Return only valid JSON using the required response structure.
+Provide useful coaching feedback based only on the supplied data.
+
+Include positive feedback when the speaker demonstrates a clear
+strength.
+
+For weaknesses:
+
+1. Identify the specific issue.
+2. Use evidence from the supplied speech data.
+3. Explain why the issue matters.
+4. Give a practical recommendation.
+
+Do not invent information that is not present in the semantic
+speech data.
 """
