@@ -1,4 +1,7 @@
+```python
 from session_manager import SessionManager
+
+from coaching_engine.engine import CoachingEngine
 
 from audio.recorder import record_audio
 from audio.transcriber import transcribe_audio
@@ -20,7 +23,8 @@ def run_session():
         4. Analyze audio
         5. Calculate raw speech metrics
         6. Analyze semantic speech content
-        7. Complete session
+        7. Run coaching engine
+        8. Complete session
     """
 
     # -----------------------------------------------------
@@ -109,7 +113,115 @@ def run_session():
     print(f"Speech content saved to: {speech_content_path}")
 
     # -----------------------------------------------------
-    # 7. Complete session
+    # 7. Run Coaching Engine
+    # -----------------------------------------------------
+
+    print("\nStarting coaching analysis...")
+
+    coaching_engine = CoachingEngine(
+        sessions_dir="sessions"
+    )
+
+    feedback, scores = coaching_engine.analyze_session(
+        session_id=session.session_id
+    )
+
+    print("\nCoaching analysis completed.")
+
+    # -----------------------------------------------------
+    # Display coaching scores
+    # -----------------------------------------------------
+
+    print("\n========================================")
+    print("COACHING SCORES")
+    print("========================================")
+
+    print(
+        f"Quantitative:   "
+        f"{scores.categories.quantitative:.2f}"
+    )
+
+    print(
+        f"Argumentation:  "
+        f"{scores.categories.argumentation:.2f}"
+    )
+
+    print(
+        f"Rebuttal:       "
+        f"{scores.categories.rebuttal:.2f}"
+    )
+
+    print(
+        f"Structure:      "
+        f"{scores.categories.structure:.2f}"
+    )
+
+    print(
+        f"Persuasion:     "
+        f"{scores.categories.persuasion:.2f}"
+    )
+
+    print(
+        f"Logic:          "
+        f"{scores.categories.logic:.2f}"
+    )
+
+    print("----------------------------------------")
+
+    print(
+        f"Overall:        "
+        f"{scores.overall:.2f}"
+    )
+
+    # -----------------------------------------------------
+    # Display coaching feedback
+    # -----------------------------------------------------
+
+    print("\n========================================")
+    print("COACHING FEEDBACK")
+    print("========================================")
+
+    if not feedback:
+        print("\nNo coaching feedback generated.")
+
+    else:
+        for item in feedback:
+
+            print(
+                f"\n[{item.severity.upper()}] "
+                f"{item.title}"
+            )
+
+            print(
+                f"Category: {item.category}"
+            )
+
+            print(
+                f"Issue: {item.issue}"
+            )
+
+            if item.evidence:
+                print("Evidence:")
+
+                for evidence in item.evidence:
+                    print(
+                        f"  - {evidence}"
+                    )
+
+            if item.explanation:
+                print(
+                    f"Explanation: "
+                    f"{item.explanation}"
+                )
+
+            if item.recommendation:
+                print(
+                    f"Recommendation: "
+                    f"{item.recommendation}"
+                )
+
+    # -----------------------------------------------------
+    # 8. Complete session
     # -----------------------------------------------------
 
     session.complete()
@@ -117,15 +229,50 @@ def run_session():
     print("\n========================================")
     print("SESSION COMPLETED")
     print("========================================")
-    print(f"Session ID:        {session.session_id}")
-    print(f"Session directory: {session.session_directory}")
-    print(f"Audio:             {session.audio_path}")
-    print(f"Transcription:     {session.transcription_path}")
-    print(f"Audio analysis:    {session.analysis_path}")
-    print(f"Raw metrics:       {raw_metrics_path}")
-    print(f"Speech content:    {speech_content_path}")
+
+    print(
+        f"Session ID:        "
+        f"{session.session_id}"
+    )
+
+    print(
+        f"Session directory: "
+        f"{session.session_directory}"
+    )
+
+    print(
+        f"Audio:             "
+        f"{session.audio_path}"
+    )
+
+    print(
+        f"Transcription:     "
+        f"{session.transcription_path}"
+    )
+
+    print(
+        f"Audio analysis:    "
+        f"{session.analysis_path}"
+    )
+
+    print(
+        f"Raw metrics:       "
+        f"{raw_metrics_path}"
+    )
+
+    print(
+        f"Speech content:    "
+        f"{speech_content_path}"
+    )
+
+    print(
+        f"Overall score:     "
+        f"{scores.overall:.2f}"
+    )
+
     print("========================================\n")
 
 
 if __name__ == "__main__":
     run_session()
+```
