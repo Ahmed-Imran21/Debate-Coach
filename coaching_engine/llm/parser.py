@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, List
+from typing import List
 
 from ..models.feedback import FeedbackItem
 
@@ -24,43 +24,20 @@ def parse_feedback_response(
     response: str,
 ) -> List[FeedbackItem]:
     """
-    Parse an LLM response into FeedbackItem objects.
+    Parse a structured Groq response into FeedbackItem objects.
 
-    The LLM is expected to return:
-
-        {
-            "feedback": [
-                {
-                    "category": "...",
-                    "title": "...",
-                    "issue": "...",
-                    "severity": "...",
-                    "evidence": [...],
-                    "explanation": "...",
-                    "recommendation": "...",
-                    "metadata": {...}
-                }
-            ]
-        }
-
-    Args:
-        response:
-            Raw response returned by the LLM.
-
-    Returns:
-        A list of FeedbackItem objects.
-
-    Raises:
-        ValueError:
-            If the response is invalid or does not follow the
-            expected structure.
+    The Groq API is expected to have already validated the
+    response against FEEDBACK_RESPONSE_SCHEMA.
     """
 
     if not response or not response.strip():
-        raise ValueError("LLM response is empty.")
+        raise ValueError(
+            "LLM response is empty."
+        )
 
     try:
         data = json.loads(response)
+
     except json.JSONDecodeError as exc:
         raise ValueError(
             "LLM response is not valid JSON."
@@ -87,10 +64,43 @@ def parse_feedback_response(
                 f"Feedback item {index} must be a JSON object."
             )
 
-        category = item.get("category")
-        title = item.get("title")
-        issue = item.get("issue")
-        severity = item.get("severity")
+        # --------------------------------------------------
+        # Required fields
+        # --------------------------------------------------
+
+        required_fields = {
+            "category",
+            "title",
+            "issue",
+            "severity",
+            "evidence",
+            "explanation",
+            "recommendation",
+            "metadata",
+        }
+
+        missing_fields = (
+            required_fields - item.keys()
+        )
+
+        if missing_fields:
+            raise ValueError(
+                f"Feedback item {index} is missing required "
+                f"fields: {sorted(missing_fields)}"
+            )
+
+        category = item["category"]
+        title = item["title"]
+        issue = item["issue"]
+        severity = item["severity"]
+        evidence = item["evidence"]
+        explanation = item["explanation"]
+        recommendation = item["recommendation"]
+        metadata = item["metadata"]
+
+        # --------------------------------------------------
+        # Category
+        # --------------------------------------------------
 
         if not isinstance(category, str):
             raise ValueError(
@@ -103,15 +113,34 @@ def parse_feedback_response(
                 f"{category}"
             )
 
-        if not isinstance(title, str) or not title.strip():
-            raise ValueError(
-                f"Feedback item {index} has an invalid title."
-            )
+        # --------------------------------------------------
+        # Text fields
+        # --------------------------------------------------
 
-        if not isinstance(issue, str) or not issue.strip():
-            raise ValueError(
-                f"Feedback item {index} has an invalid issue."
-            )
+        text_fields = {
+            "title": title,
+            "issue": issue,
+            "explanation": explanation,
+            "recommendation": recommendation,
+        }
+
+        for field_name, value in text_fields.items():
+
+            if not isinstance(value, str):
+                raise ValueError(
+                    f"Feedback item {index} field "
+                    f"'{field_name}' must be a string."
+                )
+
+            if not value.strip():
+                raise ValueError(
+                    f"Feedback item {index} field "
+                    f"'{field_name}' cannot be empty."
+                )
+
+        # --------------------------------------------------
+        # Severity
+        # --------------------------------------------------
 
         if severity not in VALID_SEVERITIES:
             raise ValueError(
@@ -119,40 +148,39 @@ def parse_feedback_response(
                 f"{severity}"
             )
 
-        evidence = item.get("evidence", [])
-
-        if evidence is None:
-            evidence = []
+        # --------------------------------------------------
+        # Evidence
+        # --------------------------------------------------
 
         if not isinstance(evidence, list):
             raise ValueError(
-                f"Feedback item {index} has invalid evidence."
+                f"Feedback item {index} evidence must be a list."
             )
 
-        evidence = [
-            str(value)
-            for value in evidence
-        ]
+        for evidence_item in evidence:
 
-        explanation = item.get("explanation")
+            if not isinstance(
+                evidence_item,
+                str,
+            ):
+                raise ValueError(
+                    f"Feedback item {index} evidence "
+                    "items must be strings."
+                )
 
-        if explanation is not None:
-            explanation = str(explanation)
-
-        recommendation = item.get("recommendation")
-
-        if recommendation is not None:
-            recommendation = str(recommendation)
-
-        metadata = item.get("metadata", {})
-
-        if metadata is None:
-            metadata = {}
+        # --------------------------------------------------
+        # Metadata
+        # --------------------------------------------------
 
         if not isinstance(metadata, dict):
             raise ValueError(
-                f"Feedback item {index} has invalid metadata."
+                f"Feedback item {index} metadata must be "
+                "an object."
             )
+
+        # --------------------------------------------------
+        # Build FeedbackItem
+        # --------------------------------------------------
 
         feedback_items.append(
             FeedbackItem(
@@ -160,13 +188,13 @@ def parse_feedback_response(
                 title=title.strip(),
                 issue=issue.strip(),
                 severity=severity,
-                evidence=evidence,
-                explanation=explanation.strip()
-                if explanation
-                else None,
-                recommendation=recommendation.strip()
-                if recommendation
-                else None,
+                evidence=[
+                    value.strip()
+                    for value in evidence
+                    if value.strip()
+                ],
+                explanation=explanation.strip(),
+                recommendation=recommendation.strip(),
                 metadata=metadata,
             )
         )

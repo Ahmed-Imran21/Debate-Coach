@@ -1,10 +1,3 @@
-from .llm.client import LLMClient
-from .llm.parser import parse_feedback_response
-from .llm.prompts import (
-    SYSTEM_PROMPT,
-    build_qualitative_prompt,
-)
-
 from typing import List, Tuple
 
 from .models.feedback import FeedbackItem
@@ -37,6 +30,14 @@ from .quantitative_feedback import (
 from .utils.loader import load_session
 from .utils.validators import validate_session
 
+from .llm.client import LLMClient
+from .llm.parser import parse_feedback_response
+from .llm.prompts import (
+    FEEDBACK_RESPONSE_SCHEMA,
+    SYSTEM_PROMPT,
+    build_qualitative_prompt,
+)
+
 
 QUALITATIVE_CATEGORIES = [
     "argumentation",
@@ -55,14 +56,14 @@ class CoachingEngine:
 
         1. Loads the session.
         2. Validates the input.
-        3. Runs deterministic quantitative analysis.
+        3. Runs quantitative analysis.
         4. Runs deterministic semantic analysis.
         5. Runs LLM-based qualitative analysis.
         6. Aggregates all feedback.
         7. Calculates coaching scores.
 
-    The engine is responsible for orchestration only.
-    Analysis logic remains inside the individual modules.
+    The engine is responsible only for orchestration.
+    Analysis logic remains inside individual modules.
     """
 
     def __init__(
@@ -71,7 +72,6 @@ class CoachingEngine:
         llm_client: LLMClient | None = None,
     ):
         self.sessions_dir = sessions_dir
-
         self.llm_client = llm_client or LLMClient()
 
     def _run_llm_analysis(
@@ -79,16 +79,16 @@ class CoachingEngine:
         speech_content: dict,
     ) -> List[FeedbackItem]:
         """
-        Run LLM-based qualitative analysis for all coaching
-        categories.
+        Run LLM-based qualitative analysis.
 
-        Each category receives its own focused prompt so that
-        the model evaluates one qualitative dimension at a time.
+        Each qualitative category receives a separate focused
+        analysis from the LLM.
         """
 
         feedback: List[FeedbackItem] = []
 
         for category in QUALITATIVE_CATEGORIES:
+
             prompt = build_qualitative_prompt(
                 category=category,
                 speech_content=speech_content,
@@ -97,6 +97,7 @@ class CoachingEngine:
             response = self.llm_client.generate(
                 system_prompt=SYSTEM_PROMPT,
                 user_prompt=prompt,
+                response_schema=FEEDBACK_RESPONSE_SCHEMA,
             )
 
             category_feedback = parse_feedback_response(
@@ -114,6 +115,10 @@ class CoachingEngine:
         """
         Analyze a complete debate session.
 
+        Args:
+            session_id:
+                ID of the session to analyze.
+
         Returns:
             A tuple containing:
 
@@ -121,30 +126,40 @@ class CoachingEngine:
             - coaching scores
         """
 
+        # --------------------------------------------------
+        # 1. Load session
+        # --------------------------------------------------
+
         session = load_session(
             session_id=session_id,
             sessions_dir=self.sessions_dir,
         )
+
+        # --------------------------------------------------
+        # 2. Validate session
+        # --------------------------------------------------
 
         validate_session(session)
 
         feedback: List[FeedbackItem] = []
 
         # --------------------------------------------------
-        # 1. Quantitative analysis
+        # 3. Quantitative analysis
         # --------------------------------------------------
 
         quantitative_feedback = (
             analyze_quantitative_feedback(session)
         )
 
-        feedback.extend(quantitative_feedback)
+        feedback.extend(
+            quantitative_feedback
+        )
 
         # --------------------------------------------------
-        # 2. Deterministic semantic analysis
+        # 4. Deterministic semantic analysis
         # --------------------------------------------------
 
-        semantic_feedback = []
+        semantic_feedback: List[FeedbackItem] = []
 
         semantic_feedback.extend(
             analyze_argumentation(session)
@@ -166,20 +181,24 @@ class CoachingEngine:
             analyze_logic(session)
         )
 
-        feedback.extend(semantic_feedback)
+        feedback.extend(
+            semantic_feedback
+        )
 
         # --------------------------------------------------
-        # 3. LLM qualitative analysis
+        # 5. LLM qualitative analysis
         # --------------------------------------------------
 
         llm_feedback = self._run_llm_analysis(
             speech_content=session.speech_content
         )
 
-        feedback.extend(llm_feedback)
+        feedback.extend(
+            llm_feedback
+        )
 
         # --------------------------------------------------
-        # 4. Aggregate feedback
+        # 6. Aggregate feedback
         # --------------------------------------------------
 
         aggregated_feedback = aggregate_feedback(
@@ -187,7 +206,7 @@ class CoachingEngine:
         )
 
         # --------------------------------------------------
-        # 5. Calculate scores
+        # 7. Calculate scores
         # --------------------------------------------------
 
         scores = build_coaching_scores(
