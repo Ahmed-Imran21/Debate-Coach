@@ -30,10 +30,6 @@ You must return only the structured response requested by the schema.
 """
 
 
-# -------------------------------------------------------------------
-# Structured output schema
-# -------------------------------------------------------------------
-
 FEEDBACK_RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -53,10 +49,10 @@ FEEDBACK_RESPONSE_SCHEMA = {
                         ],
                     },
                     "title": {
-                        "type": "string",
+                        "type": "string"
                     },
                     "issue": {
-                        "type": "string",
+                        "type": "string"
                     },
                     "severity": {
                         "type": "string",
@@ -70,18 +66,19 @@ FEEDBACK_RESPONSE_SCHEMA = {
                     "evidence": {
                         "type": "array",
                         "items": {
-                            "type": "string",
+                            "type": "string"
                         },
                     },
                     "explanation": {
-                        "type": "string",
+                        "type": "string"
                     },
                     "recommendation": {
-                        "type": "string",
+                        "type": "string"
                     },
                     "metadata": {
                         "type": "object",
-                        "additionalProperties": True,
+                        "properties": {},
+                        "additionalProperties": False,
                     },
                 },
                 "required": [
@@ -99,15 +96,11 @@ FEEDBACK_RESPONSE_SCHEMA = {
         }
     },
     "required": [
-        "feedback",
+        "feedback"
     ],
     "additionalProperties": False,
 }
 
-
-# -------------------------------------------------------------------
-# Category-specific instructions
-# -------------------------------------------------------------------
 
 CATEGORY_INSTRUCTIONS = {
     "argumentation": """
@@ -216,33 +209,16 @@ def build_qualitative_prompt(
 ) -> str:
     """
     Build a category-specific prompt for qualitative debate analysis.
-
-    Args:
-        category:
-            One of the supported qualitative categories.
-
-        speech_content:
-            Semantic speech analysis produced by the previous
-            pipeline stage.
-
-    Returns:
-        A prompt string for the LLM.
     """
 
     if not isinstance(category, str):
-        raise TypeError(
-            "category must be a string."
-        )
+        raise TypeError("category must be a string.")
 
     if not category.strip():
-        raise ValueError(
-            "category cannot be empty."
-        )
+        raise ValueError("category cannot be empty.")
 
     if not isinstance(speech_content, dict):
-        raise TypeError(
-            "speech_content must be a dictionary."
-        )
+        raise TypeError("speech_content must be a dictionary.")
 
     category = category.strip().lower()
 
