@@ -1,4 +1,3 @@
-```python
 from session_manager import SessionManager
 
 from coaching_engine.engine import CoachingEngine
@@ -275,4 +274,3 @@ def run_session():
 
 if __name__ == "__main__":
     run_session()
-```
