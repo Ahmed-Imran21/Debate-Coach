@@ -1,6 +1,9 @@
 from session_manager import SessionManager
 
 from coaching_engine.engine import CoachingEngine
+from coaching_engine.utils.result_writer import (
+    save_coaching_results,
+)
 
 from audio.recorder import record_audio
 from audio.transcriber import transcribe_audio
@@ -23,7 +26,8 @@ def run_session():
         5. Calculate raw speech metrics
         6. Analyze semantic speech content
         7. Run coaching engine
-        8. Complete session
+        8. Save coaching results
+        9. Complete session
     """
 
     # -----------------------------------------------------
@@ -35,7 +39,10 @@ def run_session():
     session = manager.create_session()
 
     print(f"\nSession created: {session.session_id}")
-    print(f"Session directory: {session.session_directory}")
+    print(
+        f"Session directory: "
+        f"{session.session_directory}"
+    )
 
     session.start()
 
@@ -51,7 +58,10 @@ def run_session():
 
     session.finish_recording()
 
-    print(f"Recording saved to: {session.audio_path}")
+    print(
+        f"Recording saved to: "
+        f"{session.audio_path}"
+    )
 
     # -----------------------------------------------------
     # 3. Transcribe audio
@@ -62,12 +72,15 @@ def run_session():
     transcription_path, transcription = transcribe_audio(
         session.audio_path,
         session.session_id,
-        session.session_directory
+        session.session_directory,
     )
 
     session.finish_transcription()
 
-    print(f"Transcription saved to: {transcription_path}")
+    print(
+        f"Transcription saved to: "
+        f"{transcription_path}"
+    )
 
     # -----------------------------------------------------
     # 4. Analyze audio
@@ -78,12 +91,15 @@ def run_session():
     analysis_path, analysis = analyze_audio(
         session.audio_path,
         session.session_id,
-        session.session_directory
+        session.session_directory,
     )
 
     session.finish_analysis()
 
-    print(f"Audio analysis saved to: {analysis_path}")
+    print(
+        f"Audio analysis saved to: "
+        f"{analysis_path}"
+    )
 
     # -----------------------------------------------------
     # 5. Calculate raw speech metrics
@@ -93,10 +109,13 @@ def run_session():
 
     raw_metrics_path, raw_metrics = analyze_metrics(
         session.session_id,
-        session.session_directory
+        session.session_directory,
     )
 
-    print(f"Raw metrics saved to: {raw_metrics_path}")
+    print(
+        f"Raw metrics saved to: "
+        f"{raw_metrics_path}"
+    )
 
     # -----------------------------------------------------
     # 6. Analyze semantic speech content
@@ -106,10 +125,13 @@ def run_session():
 
     speech_content_path, speech_content = analyze_speech(
         session.session_id,
-        session.session_directory
+        session.session_directory,
     )
 
-    print(f"Speech content saved to: {speech_content_path}")
+    print(
+        f"Speech content saved to: "
+        f"{speech_content_path}"
+    )
 
     # -----------------------------------------------------
     # 7. Run Coaching Engine
@@ -121,11 +143,33 @@ def run_session():
         sessions_dir="sessions"
     )
 
-    feedback, scores = coaching_engine.analyze_session(
-        session_id=session.session_id
+    feedback, scores = (
+        coaching_engine.analyze_session(
+            session_id=session.session_id
+        )
     )
 
-    print("\nCoaching analysis completed.")
+    print(
+        "\nCoaching analysis completed."
+    )
+
+    # -----------------------------------------------------
+    # 8. Save coaching results
+    # -----------------------------------------------------
+
+    print("\nSaving coaching results...")
+
+    feedback_path = save_coaching_results(
+        session_id=session.session_id,
+        feedback=feedback,
+        scores=scores,
+        sessions_dir="sessions",
+    )
+
+    print(
+        f"Coaching feedback saved to: "
+        f"{feedback_path}"
+    )
 
     # -----------------------------------------------------
     # Display coaching scores
@@ -192,11 +236,13 @@ def run_session():
             )
 
             print(
-                f"Category: {item.category}"
+                f"Category: "
+                f"{item.category}"
             )
 
             print(
-                f"Issue: {item.issue}"
+                f"Issue: "
+                f"{item.issue}"
             )
 
             if item.evidence:
@@ -220,7 +266,7 @@ def run_session():
                 )
 
     # -----------------------------------------------------
-    # 8. Complete session
+    # 9. Complete session
     # -----------------------------------------------------
 
     session.complete()
@@ -262,6 +308,11 @@ def run_session():
     print(
         f"Speech content:    "
         f"{speech_content_path}"
+    )
+
+    print(
+        f"Feedback:          "
+        f"{feedback_path}"
     )
 
     print(
