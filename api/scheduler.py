@@ -9,16 +9,15 @@ from .rate_limiter import RateLimiter
 
 class APIScheduler:
     """
-    Central API-key scheduler.
+    Capacity-aware scheduler.
 
-    Responsible for:
+    Responsibilities:
+    - find compatible API keys
+    - rank them by available capacity
+    - atomically reserve capacity
+    - release/commit reservations
 
-        1. Finding keys compatible with a request.
-        2. Checking their available capacity.
-        3. Selecting the best key.
-        4. Reserving capacity before returning the key.
-
-    The scheduler does NOT make API calls itself.
+    It does NOT make API calls.
     """
 
     def __init__(
@@ -29,75 +28,85 @@ class APIScheduler:
         self.registry = registry
         self.rate_limiter = rate_limiter
 
-    # ============================================================
-    # PUBLIC API
-    # ============================================================
+    # -----------------------------------------------------
+    # Acquire
+    # -----------------------------------------------------
 
     def acquire(
         self,
         request: APIRequest,
     ) -> Optional[APIReservation]:
-        """
-        Find and reserve the best API key for a request.
-
-        Returns:
-            APIReservation if a suitable key exists.
-            None if no key currently has enough capacity.
-        """
 
         candidates = self._get_candidates(request)
 
         if not candidates:
             return None
 
-        candidates = [
-            key
-            for key in candidates
-            if self.rate_limiter.can_handle(
+        # -------------------------------------------------
+        # Rank candidates from best to worst
+        # -------------------------------------------------
+
+        candidates = sorted(
+            candidates,
+            key=lambda key: self._score_key(
+                key,
+                request,
+            ),
+            reverse=True,
+        )
+
+        # -------------------------------------------------
+        # Try candidates one by one
+        #
+        # This is important for concurrency.
+        # A key may become unavailable between the
+        # capacity check and the actual reservation.
+        # -------------------------------------------------
+
+        for key in candidates:
+
+            if not self.rate_limiter.can_handle(
                 key,
                 request.estimated_tokens,
                 request.estimated_requests,
+            ):
+                continue
+
+            reservation = APIReservation(
+                reservation_id=str(uuid4()),
+                request_id=request.request_id,
+                api_key_id=key.id,
+                reserved_tokens=request.estimated_tokens,
+                reserved_requests=request.estimated_requests,
+                created_at=datetime.utcnow(),
             )
-        ]
 
-        if not candidates:
-            return None
+            # -------------------------------------------------
+            # reserve() performs the actual atomic check
+            # -------------------------------------------------
 
-        selected_key = self._select_best_key(
-            candidates,
-            request,
-        )
+            success = self.rate_limiter.reserve(
+                key,
+                reservation,
+            )
 
-        reservation = APIReservation(
-            reservation_id=str(uuid4()),
-            request_id=request.request_id,
-            api_key_id=selected_key.id,
-            reserved_tokens=request.estimated_tokens,
-            reserved_requests=request.estimated_requests,
-            created_at=datetime.utcnow(),
-        )
+            if success:
+                return reservation
 
-        success = self.rate_limiter.reserve(
-            selected_key,
-            reservation,
-        )
+        # -------------------------------------------------
+        # No key currently has enough capacity
+        # -------------------------------------------------
 
-        if not success:
-            return None
+        return None
 
-        return reservation
-
-    # ============================================================
-    # FIND CANDIDATES
-    # ============================================================
+    # -----------------------------------------------------
+    # Candidate selection
+    # -----------------------------------------------------
 
     def _get_candidates(
         self,
         request: APIRequest,
     ) -> List[APIKey]:
-        """
-        Find keys that are compatible with the request.
-        """
 
         keys = self.registry.get_enabled_keys()
 
@@ -105,20 +114,14 @@ class APIScheduler:
 
         for key in keys:
 
-            # ----------------------------------------------------
             # Provider restriction
-            # ----------------------------------------------------
-
             if (
                 request.provider is not None
                 and key.provider != request.provider
             ):
                 continue
 
-            # ----------------------------------------------------
             # Model restriction
-            # ----------------------------------------------------
-
             if (
                 request.model is not None
                 and key.model != request.model
@@ -129,108 +132,89 @@ class APIScheduler:
 
         return candidates
 
-    # ============================================================
-    # SELECT BEST KEY
-    # ============================================================
+    # -----------------------------------------------------
+    # Key scoring
+    # -----------------------------------------------------
 
-    def _select_best_key(
+    def _score_key(
         self,
-        candidates: List[APIKey],
+        key: APIKey,
         request: APIRequest,
-    ) -> APIKey:
-        """
-        Select the key with the greatest remaining capacity.
+    ) -> float:
 
-        This is intentionally NOT simple round-robin.
-
-        A key with 7,000 TPM remaining is more useful for a
-        3,000-token request than a key with only 3,500 TPM remaining.
-
-        We score keys based on their remaining TPM percentage.
-        """
-
-        def score(key: APIKey):
-
-            remaining_tpm = (
-                self.rate_limiter.remaining_tokens_per_minute(
-                    key
-                )
-            )
-
-            remaining_tpd = (
-                self.rate_limiter.remaining_tokens_per_day(
-                    key
-                )
-            )
-
-            remaining_rpm = (
-                self.rate_limiter.remaining_requests_per_minute(
-                    key
-                )
-            )
-
-            remaining_rpd = (
-                self.rate_limiter.remaining_requests_per_day(
-                    key
-                )
-            )
-
-            # ----------------------------------------------------
-            # Normalize capacity
-            # ----------------------------------------------------
-
-            tpm_ratio = (
-                remaining_tpm / key.limits.tpm
-                if key.limits.tpm > 0
-                else 0
-            )
-
-            tpd_ratio = (
-                remaining_tpd / key.limits.tpd
-                if key.limits.tpd > 0
-                else 0
-            )
-
-            rpm_ratio = (
-                remaining_rpm / key.limits.rpm
-                if key.limits.rpm > 0
-                else 0
-            )
-
-            rpd_ratio = (
-                remaining_rpd / key.limits.rpd
-                if key.limits.rpd > 0
-                else 0
-            )
-
-            # TPM gets the highest weight because token capacity
-            # will generally be the important throughput constraint.
-            return (
-                tpm_ratio * 0.50
-                + tpd_ratio * 0.25
-                + rpm_ratio * 0.15
-                + rpd_ratio * 0.10
-            )
-
-        return max(
-            candidates,
-            key=score,
+        remaining_tpm = (
+            self.rate_limiter
+            .remaining_tokens_per_minute(key)
         )
 
-    # ============================================================
-    # RELEASE
-    # ============================================================
+        remaining_tpd = (
+            self.rate_limiter
+            .remaining_tokens_per_day(key)
+        )
+
+        remaining_rpm = (
+            self.rate_limiter
+            .remaining_requests_per_minute(key)
+        )
+
+        remaining_rpd = (
+            self.rate_limiter
+            .remaining_requests_per_day(key)
+        )
+
+        # -------------------------------------------------
+        # Convert remaining capacity to ratios
+        # -------------------------------------------------
+
+        tpm_ratio = (
+            remaining_tpm / key.limits.tpm
+            if key.limits.tpm > 0
+            else 0
+        )
+
+        tpd_ratio = (
+            remaining_tpd / key.limits.tpd
+            if key.limits.tpd > 0
+            else 0
+        )
+
+        rpm_ratio = (
+            remaining_rpm / key.limits.rpm
+            if key.limits.rpm > 0
+            else 0
+        )
+
+        rpd_ratio = (
+            remaining_rpd / key.limits.rpd
+            if key.limits.rpd > 0
+            else 0
+        )
+
+        # -------------------------------------------------
+        # Weighted capacity score
+        #
+        # TPM gets the highest weight because token
+        # capacity is generally the most important
+        # resource for LLM requests.
+        # -------------------------------------------------
+
+        score = (
+            tpm_ratio * 0.50
+            + tpd_ratio * 0.25
+            + rpm_ratio * 0.15
+            + rpd_ratio * 0.10
+        )
+
+        return score
+
+    # -----------------------------------------------------
+    # Release reservation
+    # -----------------------------------------------------
 
     def release(
         self,
         reservation: APIReservation,
     ) -> None:
-        """
-        Release a reservation when the request did not execute.
-
-        This is useful when a worker fails before making the
-        provider request.
-        """
 
         key = self.registry.get_key(
             reservation.api_key_id
@@ -241,19 +225,15 @@ class APIScheduler:
             reservation,
         )
 
-    # ============================================================
-    # COMMIT
-    # ============================================================
+    # -----------------------------------------------------
+    # Commit successful request
+    # -----------------------------------------------------
 
     def commit(
         self,
         reservation: APIReservation,
         actual_tokens: Optional[int] = None,
     ) -> None:
-        """
-        Convert a reservation into actual usage after a request
-        completes.
-        """
 
         key = self.registry.get_key(
             reservation.api_key_id
@@ -265,17 +245,14 @@ class APIScheduler:
             actual_tokens=actual_tokens,
         )
 
-    # ============================================================
-    # GET KEY
-    # ============================================================
+    # -----------------------------------------------------
+    # Get reserved API key
+    # -----------------------------------------------------
 
     def get_reserved_key(
         self,
         reservation: APIReservation,
     ) -> APIKey:
-        """
-        Return the API key associated with a reservation.
-        """
 
         return self.registry.get_key(
             reservation.api_key_id
