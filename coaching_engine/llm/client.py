@@ -1,54 +1,45 @@
-import os
 from typing import Optional
 
-from dotenv import load_dotenv
-from groq import Groq
-
-
-load_dotenv()
+from api.client import APIClient
 
 
 class LLMClient:
     """
-    Handles communication with the Groq language model.
+    Compatibility wrapper for the coaching engine.
 
-    This class is responsible only for:
-        - connecting to Groq
-        - sending prompts
-        - requesting structured JSON output
-        - returning the model response
+    The actual API key selection, rate limiting, reservation,
+    provider selection, and usage tracking are handled by the
+    centralized APIClient.
 
-    Prompt construction and response parsing are handled elsewhere.
+    Prompt construction and response parsing remain in the
+    coaching_engine package.
     """
 
+    DEFAULT_PROVIDER = "groq"
     DEFAULT_MODEL = "openai/gpt-oss-120b"
+
+    # Conservative scheduler estimate.
+    ESTIMATED_OUTPUT_TOKENS = 2500
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_client: Optional[APIClient] = None,
         model: str = DEFAULT_MODEL,
     ):
         """
-        Initialize the Groq client.
+        Initialize the coaching LLM client.
 
         Args:
-            api_key:
-                Optional Groq API key. If not provided, the
-                GROQ_API_KEY environment variable is used.
+            api_client:
+                Optional shared APIClient.
 
             model:
-                Groq model identifier.
+                Model to request from the scheduler.
         """
 
-        api_key = api_key or os.getenv("GROQ_API_KEY")
+        self.api_client = api_client or APIClient()
 
-        if not api_key:
-            raise ValueError(
-                "GROQ_API_KEY was not found. "
-                "Set it in the environment or pass it explicitly."
-            )
-
-        self.client = Groq(api_key=api_key)
+        self.provider = self.DEFAULT_PROVIDER
         self.model = model
 
     def generate(
@@ -59,32 +50,45 @@ class LLMClient:
         temperature: float = 0.2,
     ) -> str:
         """
-        Send a prompt to Groq and return a structured JSON response.
+        Send a coaching request through the centralized
+        API system.
 
         Args:
             system_prompt:
-                Instructions defining the model's role and behavior.
+                Instructions defining the model's role.
 
             user_prompt:
-                The actual analysis request.
+                The actual coaching analysis request.
 
             response_schema:
-                JSON Schema that the model must follow.
+                Project response schema.
+
+                Response validation remains in the existing
+                coaching-engine parser.
 
             temperature:
-                Controls randomness. A low value is preferred for
-                consistent analytical feedback.
+                Controls response randomness.
 
         Returns:
-            The model's response as a JSON string.
+            Raw JSON response string.
         """
 
-        if not system_prompt.strip():
+        # -------------------------------------------------
+        # Validate inputs
+        # -------------------------------------------------
+
+        if (
+            not isinstance(system_prompt, str)
+            or not system_prompt.strip()
+        ):
             raise ValueError(
                 "system_prompt cannot be empty."
             )
 
-        if not user_prompt.strip():
+        if (
+            not isinstance(user_prompt, str)
+            or not user_prompt.strip()
+        ):
             raise ValueError(
                 "user_prompt cannot be empty."
             )
@@ -94,9 +98,29 @@ class LLMClient:
                 "response_schema must be a dictionary."
             )
 
-        response = self.client.chat.completions.create(
+        # -------------------------------------------------
+        # Estimate input tokens
+        # -------------------------------------------------
+
+        estimated_input_tokens = max(
+            1,
+            len(system_prompt + user_prompt) // 4,
+        )
+
+        estimated_tokens = (
+            estimated_input_tokens
+            + self.ESTIMATED_OUTPUT_TOKENS
+        )
+
+        # -------------------------------------------------
+        # Request through centralized APIClient
+        # -------------------------------------------------
+
+        response = self.api_client.generate(
+            task="coaching_analysis",
+            estimated_tokens=estimated_tokens,
+            provider=self.provider,
             model=self.model,
-            temperature=temperature,
             messages=[
                 {
                     "role": "system",
@@ -107,26 +131,30 @@ class LLMClient:
                     "content": user_prompt,
                 },
             ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "debate_coaching_feedback",
-                    "strict": True,
-                    "schema": response_schema,
-                },
-            },
+            max_tokens=self.ESTIMATED_OUTPUT_TOKENS,
+            temperature=temperature,
         )
 
-        if not response.choices:
-            raise ValueError(
-                "Groq returned no response choices."
+        # -------------------------------------------------
+        # Handle API failure
+        # -------------------------------------------------
+
+        if not response.success:
+            raise RuntimeError(
+                f"Coaching LLM request failed: "
+                f"{response.error}"
             )
 
-        content = response.choices[0].message.content
-
-        if content is None:
+        if not response.content:
             raise ValueError(
-                "Groq returned an empty response."
+                "LLM returned an empty response."
             )
 
-        return content.strip()
+        # -------------------------------------------------
+        # Return raw JSON string
+        #
+        # The existing coaching-engine parser will handle
+        # validation and conversion.
+        # -------------------------------------------------
+
+        return response.content.strip()
