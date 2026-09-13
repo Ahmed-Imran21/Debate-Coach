@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from .config import build_registry
@@ -12,10 +12,26 @@ from .providers.gemini import GeminiProvider
 
 
 class APIClient:
+    """
+    Central API gateway for the entire Debate Coach.
+
+    Responsibilities:
+        - maintain the API key registry
+        - schedule requests
+        - reserve rate-limit capacity
+        - select the appropriate provider
+        - execute the request
+        - record actual usage
+        - handle provider failures
+        - handle rate-limit errors
+
+    The application should create ONE APIClient and share
+    that instance with all components that need an LLM.
+    """
 
     def __init__(self):
         # -------------------------------------------------
-        # Core API infrastructure
+        # Central API infrastructure
         # -------------------------------------------------
 
         self.registry = build_registry()
@@ -42,7 +58,7 @@ class APIClient:
         }
 
     # -----------------------------------------------------
-    # Main generation method
+    # Generate
     # -----------------------------------------------------
 
     def generate(
@@ -57,12 +73,23 @@ class APIClient:
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
     ) -> APIResponse:
+        """
+        Execute one LLM request through the centralized
+        scheduler.
+
+        The scheduler decides which API key should be used.
+        """
+
+        if estimated_tokens < 0:
+            raise ValueError(
+                "estimated_tokens cannot be negative."
+            )
 
         request_id = str(uuid4())
 
-        # ---------------------------------------------
-        # Create scheduler request
-        # ---------------------------------------------
+        # -------------------------------------------------
+        # Create scheduling request
+        # -------------------------------------------------
 
         request = APIRequest(
             request_id=request_id,
@@ -73,42 +100,62 @@ class APIClient:
             estimated_requests=1,
         )
 
-        # ---------------------------------------------
-        # Ask scheduler for a key
-        # ---------------------------------------------
+        # -------------------------------------------------
+        # Reserve capacity
+        # -------------------------------------------------
 
-        reservation = self.scheduler.acquire(request)
+        reservation = self.scheduler.acquire(
+            request
+        )
 
         if reservation is None:
             return APIResponse(
                 request_id=request_id,
                 api_key_id="",
                 success=False,
-                error="No API key currently has enough available capacity.",
+                error=(
+                    "No API key currently has enough "
+                    "available capacity."
+                ),
             )
 
-        # ---------------------------------------------
-        # Get selected API key
-        # ---------------------------------------------
+        # -------------------------------------------------
+        # Get selected key
+        # -------------------------------------------------
 
-        api_key = self.scheduler.get_reserved_key(reservation)
+        api_key = (
+            self.scheduler.get_reserved_key(
+                reservation
+            )
+        )
 
-        provider_adapter = self.providers.get(api_key.provider)
+        # -------------------------------------------------
+        # Find provider adapter
+        # -------------------------------------------------
+
+        provider_adapter = self.providers.get(
+            api_key.provider
+        )
 
         if provider_adapter is None:
 
-            self.usage_tracker.record_failure(reservation)
+            self.usage_tracker.record_failure(
+                reservation
+            )
 
             return APIResponse(
                 request_id=request_id,
                 api_key_id=api_key.id,
                 success=False,
-                error=f"Unsupported provider: {api_key.provider}",
+                error=(
+                    f"Unsupported provider: "
+                    f"{api_key.provider}"
+                ),
             )
 
-        # ---------------------------------------------
-        # Make provider request
-        # ---------------------------------------------
+        # -------------------------------------------------
+        # Execute provider request
+        # -------------------------------------------------
 
         try:
 
@@ -116,7 +163,8 @@ class APIClient:
 
                 if messages is None:
                     raise ValueError(
-                        "messages are required when using Groq."
+                        "messages are required when "
+                        "using Groq."
                     )
 
                 result = provider_adapter.generate(
@@ -130,7 +178,8 @@ class APIClient:
 
                 if prompt is None:
                     raise ValueError(
-                        "prompt is required when using Gemini."
+                        "prompt is required when "
+                        "using Gemini."
                     )
 
                 result = provider_adapter.generate(
@@ -142,16 +191,18 @@ class APIClient:
                 )
 
             else:
-
                 raise ValueError(
-                    f"Unsupported provider: {api_key.provider}"
+                    f"Unsupported provider: "
+                    f"{api_key.provider}"
                 )
 
-            # -----------------------------------------
+            # -------------------------------------------------
             # Successful request
-            # -----------------------------------------
+            # -------------------------------------------------
 
-            actual_tokens = result.get("actual_tokens")
+            actual_tokens = result.get(
+                "actual_tokens"
+            )
 
             self.usage_tracker.record_success(
                 reservation=reservation,
@@ -166,21 +217,19 @@ class APIClient:
                 actual_tokens=actual_tokens,
             )
 
-        # ---------------------------------------------
-        # Rate limit / provider errors
-        # ---------------------------------------------
-
         except Exception as error:
 
             error_message = str(error)
 
-            # -----------------------------------------
-            # Detect common rate-limit errors
-            # -----------------------------------------
+            # -------------------------------------------------
+            # Rate-limit error
+            # -------------------------------------------------
 
             if self._is_rate_limit_error(error):
 
-                cooldown_seconds = self._get_retry_after(error)
+                cooldown_seconds = (
+                    self._get_retry_after(error)
+                )
 
                 self.usage_tracker.record_rate_limit(
                     reservation=reservation,
@@ -193,14 +242,15 @@ class APIClient:
                     success=False,
                     error=(
                         f"Rate limit reached for key "
-                        f"{api_key.id}: {error_message}"
+                        f"{api_key.id}: "
+                        f"{error_message}"
                     ),
                     status_code=429,
                 )
 
-            # -----------------------------------------
-            # Normal provider failure
-            # -----------------------------------------
+            # -------------------------------------------------
+            # Normal failure
+            # -------------------------------------------------
 
             self.usage_tracker.record_failure(
                 reservation
@@ -218,14 +268,24 @@ class APIClient:
     # -----------------------------------------------------
 
     @staticmethod
-    def _is_rate_limit_error(error: Exception) -> bool:
+    def _is_rate_limit_error(
+        error: Exception,
+    ) -> bool:
 
-        status_code = getattr(error, "status_code", None)
+        status_code = getattr(
+            error,
+            "status_code",
+            None,
+        )
 
         if status_code == 429:
             return True
 
-        response = getattr(error, "response", None)
+        response = getattr(
+            error,
+            "response",
+            None,
+        )
 
         if response is not None:
 
@@ -259,9 +319,14 @@ class APIClient:
     # -----------------------------------------------------
 
     @staticmethod
-    def _get_retry_after(error: Exception) -> float:
+    def _get_retry_after(
+        error: Exception,
+    ) -> float:
 
-        # Try direct attribute
+        # -------------------------------------------------
+        # Direct retry_after attribute
+        # -------------------------------------------------
+
         retry_after = getattr(
             error,
             "retry_after",
@@ -272,10 +337,17 @@ class APIClient:
 
             try:
                 return float(retry_after)
-            except (TypeError, ValueError):
+
+            except (
+                TypeError,
+                ValueError,
+            ):
                 pass
 
-        # Try response headers
+        # -------------------------------------------------
+        # Response headers
+        # -------------------------------------------------
+
         response = getattr(
             error,
             "response",
@@ -300,25 +372,34 @@ class APIClient:
 
                     try:
                         return float(value)
-                    except (TypeError, ValueError):
+
+                    except (
+                        TypeError,
+                        ValueError,
+                    ):
                         pass
 
+        # -------------------------------------------------
         # Safe fallback
+        # -------------------------------------------------
+
         return 60.0
 
     # -----------------------------------------------------
-    # Status
+    # API status
     # -----------------------------------------------------
 
-    def get_status(self) -> List[Dict[str, Any]]:
+    def get_status(
+        self,
+    ) -> List[Dict[str, Any]]:
         """
-        Return current status of every registered API key.
+        Return the current status of every API key.
         """
 
         return self.usage_tracker.get_all_status()
 
     # -----------------------------------------------------
-    # Registry access
+    # API keys
     # -----------------------------------------------------
 
     def get_keys(self):

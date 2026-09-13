@@ -1,5 +1,7 @@
 from session_manager import SessionManager
 
+from api.client import APIClient
+
 from coaching_engine.engine import CoachingEngine
 from coaching_engine.utils.result_writer import (
     save_coaching_results,
@@ -18,17 +20,28 @@ def run_session():
     """
     Run a complete Debate Coach session.
 
-    Pipeline:
-        1. Create session
-        2. Record audio
-        3. Transcribe audio
-        4. Analyze audio
-        5. Calculate raw speech metrics
-        6. Analyze semantic speech content
-        7. Run coaching engine
-        8. Save coaching results
-        9. Complete session
+    One APIClient is created for the entire session.
+
+    This means speech analysis and coaching analysis share
+    the exact same:
+        - API key registry
+        - rate limiter
+        - scheduler
+        - usage tracker
+        - provider pool
     """
+
+    # -----------------------------------------------------
+    # 0. Create shared API client
+    # -----------------------------------------------------
+
+    print("\nInitializing API system...")
+
+    api_client = APIClient()
+
+    print(
+        f"Loaded {len(api_client.get_keys())} API keys."
+    )
 
     # -----------------------------------------------------
     # 1. Create session
@@ -38,7 +51,11 @@ def run_session():
 
     session = manager.create_session()
 
-    print(f"\nSession created: {session.session_id}")
+    print(
+        f"\nSession created: "
+        f"{session.session_id}"
+    )
+
     print(
         f"Session directory: "
         f"{session.session_directory}"
@@ -105,7 +122,9 @@ def run_session():
     # 5. Calculate raw speech metrics
     # -----------------------------------------------------
 
-    print("\nCalculating raw speech metrics...")
+    print(
+        "\nCalculating raw speech metrics..."
+    )
 
     raw_metrics_path, raw_metrics = analyze_metrics(
         session.session_id,
@@ -124,8 +143,9 @@ def run_session():
     print("\nAnalyzing speech content...")
 
     speech_content_path, speech_content = analyze_speech(
-        session.session_id,
-        session.session_directory,
+        session_id=session.session_id,
+        session_directory=session.session_directory,
+        api_client=api_client,
     )
 
     print(
@@ -137,10 +157,13 @@ def run_session():
     # 7. Run Coaching Engine
     # -----------------------------------------------------
 
-    print("\nStarting coaching analysis...")
+    print(
+        "\nStarting coaching analysis..."
+    )
 
     coaching_engine = CoachingEngine(
-        sessions_dir="sessions"
+        sessions_dir="sessions",
+        api_client=api_client,
     )
 
     feedback, scores = (

@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from api.client import APIClient
+
 from .llm.client import LLMClient
 from .llm.response_parser import parse_and_validate
 
@@ -122,7 +124,11 @@ def save_speech_content(speech_content, output_path):
 # Main speech analysis function
 # ---------------------------------------------------------
 
-def analyze_speech(session_id, session_directory):
+def analyze_speech(
+    session_id,
+    session_directory,
+    api_client=None,
+):
     """
     Perform semantic LLM analysis for a session.
 
@@ -132,7 +138,13 @@ def analyze_speech(session_id, session_directory):
               ↓
         prepare transcript
               ↓
-            LLM
+        centralized APIClient
+              ↓
+        API scheduler
+              ↓
+        selected API key
+              ↓
+        LLM
               ↓
         structured response
               ↓
@@ -147,6 +159,12 @@ def analyze_speech(session_id, session_directory):
 
     session_directory : str or Path
         Directory containing the session files.
+
+    api_client : APIClient, optional
+        Shared centralized APIClient.
+
+        main.py should create ONE APIClient and pass the same
+        instance throughout the entire session.
 
     Returns
     -------
@@ -185,12 +203,14 @@ def analyze_speech(session_id, session_directory):
     )
 
     # -----------------------------------------------------
-    # Create LLM client
+    # Create LLM client using shared APIClient
     # -----------------------------------------------------
 
     print("Initializing LLM client...")
 
-    client = LLMClient()
+    client = LLMClient(
+        api_client=api_client
+    )
 
     # -----------------------------------------------------
     # Analyze speech

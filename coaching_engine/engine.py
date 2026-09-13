@@ -1,216 +1,171 @@
-from typing import List, Tuple
+from typing import Optional
 
-from .models.feedback import FeedbackItem
-from .models.scores import CoachingScores
-
-from .qualitative_feedback.argumentation import (
-    analyze_argumentation,
-)
-from .qualitative_feedback.feedback_aggregator import (
-    aggregate_feedback,
-    build_coaching_scores,
-)
-from .qualitative_feedback.logic import (
-    analyze_logic,
-)
-from .qualitative_feedback.persuasion import (
-    analyze_persuasion,
-)
-from .qualitative_feedback.rebuttal import (
-    analyze_rebuttal,
-)
-from .qualitative_feedback.structure import (
-    analyze_structure,
-)
-
-from .quantitative_feedback import (
-    analyze_quantitative_feedback,
-)
-
-from .utils.loader import load_session
-from .utils.validators import validate_session
+from api.client import APIClient
 
 from .llm.client import LLMClient
-from .llm.parser import parse_feedback_response
+from .llm.parser import parse_llm_response
 from .llm.prompts import (
-    FEEDBACK_RESPONSE_SCHEMA,
-    SYSTEM_PROMPT,
-    build_qualitative_prompt,
+    build_argumentation_prompt,
+    build_logic_prompt,
+    build_persuasion_prompt,
+    build_rebuttal_prompt,
+    build_structure_prompt,
 )
 
+from .qualitative_feedback.feedback_aggregator import aggregate_feedback
+from .quantitative_feedback import calculate_quantitative_score
 
-QUALITATIVE_CATEGORIES = [
-    "argumentation",
-    "rebuttal",
-    "structure",
-    "persuasion",
-    "logic",
-]
+from .utils.loader import load_session_data
+from .models.feedback import FeedbackItem
+from .models.scores import Scores
 
 
 class CoachingEngine:
-    """
-    Main orchestration layer for the coaching engine.
-
-    The engine:
-
-        1. Loads the session.
-        2. Validates the input.
-        3. Runs quantitative analysis.
-        4. Runs deterministic semantic analysis.
-        5. Runs LLM-based qualitative analysis.
-        6. Aggregates all feedback.
-        7. Calculates coaching scores.
-
-    The engine is responsible only for orchestration.
-    Analysis logic remains inside individual modules.
-    """
-
     def __init__(
         self,
         sessions_dir: str = "sessions",
-        llm_client: LLMClient | None = None,
+        llm_client: Optional[LLMClient] = None,
+        api_client: Optional[APIClient] = None,
     ):
         self.sessions_dir = sessions_dir
-        self.llm_client = llm_client or LLMClient()
 
-    def _run_llm_analysis(
-        self,
-        speech_content: dict,
-    ) -> List[FeedbackItem]:
-        """
-        Run LLM-based qualitative analysis.
-
-        Each qualitative category receives a separate focused
-        analysis from the LLM.
-        """
-
-        feedback: List[FeedbackItem] = []
-
-        for category in QUALITATIVE_CATEGORIES:
-
-            prompt = build_qualitative_prompt(
-                category=category,
-                speech_content=speech_content,
-            )
-
-            response = self.llm_client.generate(
-                system_prompt=SYSTEM_PROMPT,
-                user_prompt=prompt,
-                response_schema=FEEDBACK_RESPONSE_SCHEMA,
-            )
-
-            category_feedback = parse_feedback_response(
-                response
-            )
-
-            feedback.extend(category_feedback)
-
-        return feedback
+        # If an LLMClient was explicitly supplied, use it.
+        # Otherwise create one using the shared APIClient.
+        if llm_client is not None:
+            self.llm_client = llm_client
+        else:
+            self.llm_client = LLMClient(api_client=api_client)
 
     def analyze_session(
         self,
         session_id: str,
-    ) -> Tuple[List[FeedbackItem], CoachingScores]:
-        """
-        Analyze a complete debate session.
-
-        Args:
-            session_id:
-                ID of the session to analyze.
-
-        Returns:
-            A tuple containing:
-
-            - aggregated feedback
-            - coaching scores
-        """
-
-        # --------------------------------------------------
-        # 1. Load session
-        # --------------------------------------------------
-
-        session = load_session(
+    ):
+        session_data = load_session_data(
             session_id=session_id,
             sessions_dir=self.sessions_dir,
         )
 
-        # --------------------------------------------------
-        # 2. Validate session
-        # --------------------------------------------------
-
-        validate_session(session)
-
-        feedback: List[FeedbackItem] = []
-
-        # --------------------------------------------------
-        # 3. Quantitative analysis
-        # --------------------------------------------------
-
-        quantitative_feedback = (
-            analyze_quantitative_feedback(session)
+        quantitative_score = calculate_quantitative_score(
+            session_data
         )
 
-        feedback.extend(
-            quantitative_feedback
+        qualitative_feedback = self._run_llm_analysis(
+            session_data
         )
 
-        # --------------------------------------------------
-        # 4. Deterministic semantic analysis
-        # --------------------------------------------------
-
-        semantic_feedback: List[FeedbackItem] = []
-
-        semantic_feedback.extend(
-            analyze_argumentation(session)
+        feedback = aggregate_feedback(
+            qualitative_feedback
         )
 
-        semantic_feedback.extend(
-            analyze_rebuttal(session)
+        scores = Scores(
+            categories={
+                "quantitative": quantitative_score,
+                "argumentation": qualitative_feedback["argumentation"]["score"],
+                "rebuttal": qualitative_feedback["rebuttal"]["score"],
+                "structure": qualitative_feedback["structure"]["score"],
+                "persuasion": qualitative_feedback["persuasion"]["score"],
+                "logic": qualitative_feedback["logic"]["score"],
+            }
         )
 
-        semantic_feedback.extend(
-            analyze_structure(session)
+        return feedback, scores
+
+    def _run_llm_analysis(self, session_data):
+        results = {}
+
+        # -----------------------------
+        # Argumentation
+        # -----------------------------
+        argumentation_prompt = build_argumentation_prompt(
+            session_data
         )
 
-        semantic_feedback.extend(
-            analyze_persuasion(session)
+        results["argumentation"] = parse_llm_response(
+            self.llm_client.generate(
+                system_prompt=(
+                    "You are an expert debate coach specializing "
+                    "in argumentation analysis."
+                ),
+                user_prompt=argumentation_prompt,
+                response_schema={},
+                temperature=0.2,
+            )
         )
 
-        semantic_feedback.extend(
-            analyze_logic(session)
+        # -----------------------------
+        # Rebuttal
+        # -----------------------------
+        rebuttal_prompt = build_rebuttal_prompt(
+            session_data
         )
 
-        feedback.extend(
-            semantic_feedback
+        results["rebuttal"] = parse_llm_response(
+            self.llm_client.generate(
+                system_prompt=(
+                    "You are an expert debate coach specializing "
+                    "in rebuttal and counterargument analysis."
+                ),
+                user_prompt=rebuttal_prompt,
+                response_schema={},
+                temperature=0.2,
+            )
         )
 
-        # --------------------------------------------------
-        # 5. LLM qualitative analysis
-        # --------------------------------------------------
-
-        llm_feedback = self._run_llm_analysis(
-            speech_content=session.speech_content
+        # -----------------------------
+        # Structure
+        # -----------------------------
+        structure_prompt = build_structure_prompt(
+            session_data
         )
 
-        feedback.extend(
-            llm_feedback
+        results["structure"] = parse_llm_response(
+            self.llm_client.generate(
+                system_prompt=(
+                    "You are an expert debate coach specializing "
+                    "in speech structure and organization."
+                ),
+                user_prompt=structure_prompt,
+                response_schema={},
+                temperature=0.2,
+            )
         )
 
-        # --------------------------------------------------
-        # 6. Aggregate feedback
-        # --------------------------------------------------
-
-        aggregated_feedback = aggregate_feedback(
-            feedback
+        # -----------------------------
+        # Persuasion
+        # -----------------------------
+        persuasion_prompt = build_persuasion_prompt(
+            session_data
         )
 
-        # --------------------------------------------------
-        # 7. Calculate scores
-        # --------------------------------------------------
-
-        scores = build_coaching_scores(
-            aggregated_feedback
+        results["persuasion"] = parse_llm_response(
+            self.llm_client.generate(
+                system_prompt=(
+                    "You are an expert debate coach specializing "
+                    "in persuasion and rhetorical effectiveness."
+                ),
+                user_prompt=persuasion_prompt,
+                response_schema={},
+                temperature=0.2,
+            )
         )
 
-        return aggregated_feedback, scores
+        # -----------------------------
+        # Logic
+        # -----------------------------
+        logic_prompt = build_logic_prompt(
+            session_data
+        )
+
+        results["logic"] = parse_llm_response(
+            self.llm_client.generate(
+                system_prompt=(
+                    "You are an expert debate coach specializing "
+                    "in logical reasoning and fallacy detection."
+                ),
+                user_prompt=logic_prompt,
+                response_schema={},
+                temperature=0.2,
+            )
+        )
+
+        return results
