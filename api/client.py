@@ -2,6 +2,7 @@ from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
 from .config import build_registry
+
 from .models import (
     APIKey,
     APIRequest,
@@ -9,6 +10,7 @@ from .models import (
     APIResponse,
     QueuedRequest,
 )
+
 from .rate_limiter import RateLimiter
 from .scheduler import APIScheduler
 from .usage_tracker import UsageTracker
@@ -18,35 +20,36 @@ from .queue_worker import QueueWorker
 from .providers.groq import GroqProvider
 from .providers.gemini import GeminiProvider
 
+from .whisper import WhisperClient
+
 
 class APIClient:
     """
     Central API gateway for the entire Debate Coach.
 
-    Responsibilities:
-        - maintain the API key registry
-        - schedule requests
-        - reserve rate-limit capacity
-        - select the appropriate provider
-        - execute the request
-        - record actual usage
-        - handle provider failures
-        - handle rate-limit errors
-        - queue requests when no key currently has capacity, and
-          service them in the background as capacity frees up
+    This object owns TWO independent resource systems:
 
-    The application should create ONE APIClient and share
-    that instance with all components that need an LLM. This
-    is what makes concurrent multi-user usage safe: every
-    session's requests compete for capacity through the same
-    registry/rate limiter/scheduler/queue, instead of each
-    session tracking its own (incorrect) view of quota.
+        1. LLM API system
+           ----------------
+           Groq/Gemini LLM keys
+           token/request rate limiting
+           LLM request queue
+
+        2. Whisper API system
+           ------------------
+           Groq Whisper keys
+           audio-second/request rate limiting
+           Whisper request queue
+           circular Whisper key pool
+
+    Both are process-wide and shared by all sessions.
     """
 
     def __init__(self):
-        # -------------------------------------------------
-        # Central API infrastructure
-        # -------------------------------------------------
+
+        # =====================================================
+        # LLM API INFRASTRUCTURE
+        # =====================================================
 
         self.registry = build_registry()
 
@@ -62,68 +65,88 @@ class APIClient:
             rate_limiter=self.rate_limiter,
         )
 
-        # -------------------------------------------------
-        # Waiting queue for requests with no available capacity
-        # -------------------------------------------------
-
         self.request_queue = RequestQueue()
 
-        self.queue_worker = QueueWorker(self)
+        self.queue_worker = QueueWorker(
+            self
+        )
+
         self.queue_worker.start()
 
-        # -------------------------------------------------
-        # Provider adapters
-        # -------------------------------------------------
+        # =====================================================
+        # LLM PROVIDERS
+        # =====================================================
 
         self.providers = {
             "groq": GroqProvider(),
             "gemini": GeminiProvider(),
         }
 
-    # -----------------------------------------------------
-    # Shutdown
-    # -----------------------------------------------------
+        # =====================================================
+        # WHISPER API INFRASTRUCTURE
+        #
+        # This is a SINGLE process-wide WhisperClient.
+        #
+        # Every session therefore shares the same Whisper
+        # key pool and Whisper queue.
+        # =====================================================
+
+        self.whisper_client = WhisperClient()
+
+    # =========================================================
+    # SHUTDOWN
+    # =========================================================
 
     def shutdown(self) -> None:
         """
-        Stop the background queue worker.
-
-        Any requests still waiting in the queue at this point are
-        drained and given a failure response so that any caller
-        blocked in generate() (waiting on QueuedRequest.event)
-        wakes up immediately instead of hanging forever — once
-        the worker is stopped, nothing else will ever service
-        them or set their event.
+        Shut down both API systems cleanly.
         """
+
+        # -----------------------------------------------------
+        # Stop LLM queue
+        # -----------------------------------------------------
 
         self.queue_worker.stop()
 
         while True:
 
-            queued_request = self.request_queue.get_nowait()
+            queued_request = (
+                self.request_queue.get_nowait()
+            )
 
             if queued_request is None:
                 break
 
             queued_request.response = APIResponse(
-                request_id=queued_request.request.request_id,
+                request_id=(
+                    queued_request
+                    .request
+                    .request_id
+                ),
                 api_key_id="",
                 success=False,
                 queued=True,
                 estimated_wait_seconds=(
-                    queued_request.estimated_wait_seconds
+                    queued_request
+                    .estimated_wait_seconds
                 ),
                 error=(
-                    "APIClient is shutting down; queued "
-                    "request was cancelled."
+                    "APIClient is shutting down; "
+                    "queued request was cancelled."
                 ),
             )
 
             queued_request.event.set()
 
-    # -----------------------------------------------------
-    # Generate
-    # -----------------------------------------------------
+        # -----------------------------------------------------
+        # Stop Whisper queue
+        # -----------------------------------------------------
+
+        self.whisper_client.shutdown()
+
+    # =========================================================
+    # LLM GENERATE
+    # =========================================================
 
     def generate(
         self,
@@ -131,56 +154,19 @@ class APIClient:
         estimated_tokens: int,
         provider: Optional[str] = None,
         model: Optional[str] = None,
-        messages: Optional[List[Dict[str, str]]] = None,
+        messages: Optional[
+            List[Dict[str, str]]
+        ] = None,
         prompt: Optional[str] = None,
         system_instruction: Optional[str] = None,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         wait_if_queued: bool = True,
         max_wait_seconds: Optional[float] = None,
-        on_queued: Optional[Callable[[float], None]] = None,
+        on_queued: Optional[
+            Callable[[float], None]
+        ] = None,
     ) -> APIResponse:
-        """
-        Execute one LLM request through the centralized
-        scheduler.
-
-        The scheduler decides which API key should be used,
-        honoring `provider`/`model` as a preference when given,
-        or considering every enabled key when not.
-
-        If no key currently has enough capacity, the request is
-        placed on a waiting queue instead of failing outright.
-
-        Args:
-            wait_if_queued:
-                If True (default), this call blocks until the
-                queued request completes or max_wait_seconds
-                elapses, then returns the final APIResponse.
-
-                If False, the call returns immediately with
-                success=False, queued=True, and
-                estimated_wait_seconds set, without blocking.
-                Use this from an async server that wants to
-                notify the user of an ETA and poll or receive
-                a callback separately, rather than holding a
-                request thread open.
-
-            max_wait_seconds:
-                Maximum time to block waiting for a queued
-                request when wait_if_queued=True. None means
-                wait indefinitely.
-
-            on_queued:
-                Optional callback invoked with the estimated
-                wait time in seconds, the moment a request is
-                queued (before any blocking happens). Useful
-                for surfacing an ETA to the user immediately.
-
-        Returns:
-            An APIResponse. When the request was queued, check
-            `.queued` and `.estimated_wait_seconds` in addition
-            to `.success`.
-        """
 
         if estimated_tokens < 0:
             raise ValueError(
@@ -188,10 +174,6 @@ class APIClient:
             )
 
         request_id = str(uuid4())
-
-        # -------------------------------------------------
-        # Create scheduling request
-        # -------------------------------------------------
 
         request = APIRequest(
             request_id=request_id,
@@ -205,21 +187,30 @@ class APIClient:
         call_kwargs: Dict[str, Any] = {
             "messages": messages,
             "prompt": prompt,
-            "system_instruction": system_instruction,
+            "system_instruction": (
+                system_instruction
+            ),
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
 
-        # -------------------------------------------------
-        # Try to reserve capacity immediately
-        # -------------------------------------------------
+        # -----------------------------------------------------
+        # Immediate reservation
+        # -----------------------------------------------------
 
-        reservation = self.scheduler.acquire(request)
+        reservation = (
+            self.scheduler.acquire(
+                request
+            )
+        )
 
         if reservation is not None:
 
-            api_key = self.scheduler.get_reserved_key(
-                reservation
+            api_key = (
+                self.scheduler
+                .get_reserved_key(
+                    reservation
+                )
             )
 
             return self._execute_request(
@@ -229,15 +220,20 @@ class APIClient:
                 call_kwargs=call_kwargs,
             )
 
-        # -------------------------------------------------
-        # No key currently has capacity.
-        # Queue instead of failing outright.
-        # -------------------------------------------------
+        # -----------------------------------------------------
+        # Queue
+        # -----------------------------------------------------
 
-        estimated_wait = self.scheduler.estimate_wait(request)
+        estimated_wait = (
+            self.scheduler.estimate_wait(
+                request
+            )
+        )
 
         if on_queued is not None:
-            on_queued(estimated_wait)
+            on_queued(
+                estimated_wait
+            )
 
         if not wait_if_queued:
 
@@ -246,23 +242,32 @@ class APIClient:
                 api_key_id="",
                 success=False,
                 queued=True,
-                estimated_wait_seconds=estimated_wait,
+                estimated_wait_seconds=(
+                    estimated_wait
+                ),
                 error=(
-                    "No API key currently has enough available "
-                    "capacity. Request has been queued."
+                    "No API key currently has enough "
+                    "available capacity. Request has "
+                    "been queued."
                 ),
             )
 
         queued_request = QueuedRequest(
             request=request,
             call_kwargs=call_kwargs,
-            estimated_wait_seconds=estimated_wait,
+            estimated_wait_seconds=(
+                estimated_wait
+            ),
         )
 
-        self.request_queue.put(queued_request)
+        self.request_queue.put(
+            queued_request
+        )
 
-        completed = queued_request.event.wait(
-            timeout=max_wait_seconds
+        completed = (
+            queued_request.event.wait(
+                timeout=max_wait_seconds
+            )
         )
 
         if not completed:
@@ -272,22 +277,20 @@ class APIClient:
                 api_key_id="",
                 success=False,
                 queued=True,
-                estimated_wait_seconds=estimated_wait,
+                estimated_wait_seconds=(
+                    estimated_wait
+                ),
                 error=(
-                    "Timed out waiting for available API "
-                    "capacity."
+                    "Timed out waiting for available "
+                    "API capacity."
                 ),
             )
 
         return queued_request.response
 
-    # -----------------------------------------------------
-    # Execute a reserved request against its provider
-    #
-    # Extracted so both the immediate path above and
-    # QueueWorker (for requests that had to wait) can share
-    # the exact same execution + bookkeeping logic.
-    # -----------------------------------------------------
+    # =========================================================
+    # LLM EXECUTION
+    # =========================================================
 
     def _execute_request(
         self,
@@ -297,8 +300,10 @@ class APIClient:
         call_kwargs: Dict[str, Any],
     ) -> APIResponse:
 
-        provider_adapter = self.providers.get(
-            api_key.provider
+        provider_adapter = (
+            self.providers.get(
+                api_key.provider
+            )
         )
 
         if provider_adapter is None:
@@ -308,7 +313,9 @@ class APIClient:
             )
 
             return APIResponse(
-                request_id=request.request_id,
+                request_id=(
+                    request.request_id
+                ),
                 api_key_id=api_key.id,
                 success=False,
                 error=(
@@ -317,56 +324,79 @@ class APIClient:
                 ),
             )
 
-        messages = call_kwargs.get("messages")
-        prompt = call_kwargs.get("prompt")
-        system_instruction = call_kwargs.get(
-            "system_instruction"
+        messages = call_kwargs.get(
+            "messages"
         )
-        max_tokens = call_kwargs.get("max_tokens")
-        temperature = call_kwargs.get("temperature")
+
+        prompt = call_kwargs.get(
+            "prompt"
+        )
+
+        system_instruction = (
+            call_kwargs.get(
+                "system_instruction"
+            )
+        )
+
+        max_tokens = call_kwargs.get(
+            "max_tokens"
+        )
+
+        temperature = call_kwargs.get(
+            "temperature"
+        )
 
         try:
 
             if api_key.provider == "groq":
 
                 if messages is None:
+
                     raise ValueError(
-                        "messages are required when "
-                        "using Groq."
+                        "messages are required "
+                        "when using Groq."
                     )
 
-                result = provider_adapter.generate(
-                    api_key=api_key,
-                    messages=messages,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
+                result = (
+                    provider_adapter.generate(
+                        api_key=api_key,
+                        messages=messages,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                    )
                 )
 
             elif api_key.provider == "gemini":
 
                 if prompt is None:
+
                     raise ValueError(
-                        "prompt is required when "
-                        "using Gemini."
+                        "prompt is required "
+                        "when using Gemini."
                     )
 
-                result = provider_adapter.generate(
-                    api_key=api_key,
-                    prompt=prompt,
-                    system_instruction=system_instruction,
-                    max_output_tokens=max_tokens,
-                    temperature=temperature,
+                result = (
+                    provider_adapter.generate(
+                        api_key=api_key,
+                        prompt=prompt,
+                        system_instruction=(
+                            system_instruction
+                        ),
+                        max_output_tokens=(
+                            max_tokens
+                        ),
+                        temperature=(
+                            temperature
+                        ),
+                    )
                 )
 
             else:
+
                 raise ValueError(
                     f"Unsupported provider: "
                     f"{api_key.provider}"
                 )
-
-            # -------------------------------------------------
-            # Successful request
-            # -------------------------------------------------
 
             actual_tokens = result.get(
                 "actual_tokens"
@@ -378,62 +408,71 @@ class APIClient:
             )
 
             return APIResponse(
-                request_id=request.request_id,
+                request_id=(
+                    request.request_id
+                ),
                 api_key_id=api_key.id,
                 success=True,
-                content=result.get("content"),
-                actual_tokens=actual_tokens,
+                content=result.get(
+                    "content"
+                ),
+                actual_tokens=(
+                    actual_tokens
+                ),
             )
 
         except Exception as error:
 
             error_message = str(error)
 
-            # -------------------------------------------------
-            # Rate-limit error
-            # -------------------------------------------------
-
-            if self._is_rate_limit_error(error):
+            if self._is_rate_limit_error(
+                error
+            ):
 
                 cooldown_seconds = (
-                    self._get_retry_after(error)
+                    self._get_retry_after(
+                        error
+                    )
                 )
 
                 self.usage_tracker.record_rate_limit(
                     reservation=reservation,
-                    cooldown_seconds=cooldown_seconds,
+                    cooldown_seconds=(
+                        cooldown_seconds
+                    ),
                 )
 
                 return APIResponse(
-                    request_id=request.request_id,
+                    request_id=(
+                        request.request_id
+                    ),
                     api_key_id=api_key.id,
                     success=False,
                     error=(
-                        f"Rate limit reached for key "
+                        f"Rate limit reached "
+                        f"for key "
                         f"{api_key.id}: "
                         f"{error_message}"
                     ),
                     status_code=429,
                 )
 
-            # -------------------------------------------------
-            # Normal failure
-            # -------------------------------------------------
-
             self.usage_tracker.record_failure(
                 reservation
             )
 
             return APIResponse(
-                request_id=request.request_id,
+                request_id=(
+                    request.request_id
+                ),
                 api_key_id=api_key.id,
                 success=False,
                 error=error_message,
             )
 
-    # -----------------------------------------------------
-    # Rate-limit detection
-    # -----------------------------------------------------
+    # =========================================================
+    # RATE LIMIT DETECTION
+    # =========================================================
 
     @staticmethod
     def _is_rate_limit_error(
@@ -466,7 +505,9 @@ class APIClient:
             if response_status == 429:
                 return True
 
-        error_text = str(error).lower()
+        error_text = str(
+            error
+        ).lower()
 
         rate_limit_phrases = [
             "rate limit",
@@ -482,18 +523,14 @@ class APIClient:
             for phrase in rate_limit_phrases
         )
 
-    # -----------------------------------------------------
-    # Retry-after extraction
-    # -----------------------------------------------------
+    # =========================================================
+    # RETRY AFTER
+    # =========================================================
 
     @staticmethod
     def _get_retry_after(
         error: Exception,
     ) -> float:
-
-        # -------------------------------------------------
-        # Direct retry_after attribute
-        # -------------------------------------------------
 
         retry_after = getattr(
             error,
@@ -504,17 +541,16 @@ class APIClient:
         if retry_after is not None:
 
             try:
-                return float(retry_after)
+
+                return float(
+                    retry_after
+                )
 
             except (
                 TypeError,
                 ValueError,
             ):
                 pass
-
-        # -------------------------------------------------
-        # Response headers
-        # -------------------------------------------------
 
         response = getattr(
             error,
@@ -539,7 +575,10 @@ class APIClient:
                 if value is not None:
 
                     try:
-                        return float(value)
+
+                        return float(
+                            value
+                        )
 
                     except (
                         TypeError,
@@ -547,44 +586,67 @@ class APIClient:
                     ):
                         pass
 
-        # -------------------------------------------------
-        # Safe fallback
-        # -------------------------------------------------
-
         return 60.0
 
-    # -----------------------------------------------------
-    # API status
-    # -----------------------------------------------------
+    # =========================================================
+    # LLM STATUS
+    # =========================================================
 
     def get_status(
         self,
     ) -> List[Dict[str, Any]]:
-        """
-        Return the current status of every API key.
-        """
 
-        return self.usage_tracker.get_all_status()
+        return (
+            self.usage_tracker
+            .get_all_status()
+        )
 
-    # -----------------------------------------------------
-    # API keys
-    # -----------------------------------------------------
+    # =========================================================
+    # LLM KEYS
+    # =========================================================
 
     def get_keys(self):
-        """
-        Return all registered APIKey objects.
-        """
 
-        return self.registry.get_all_keys()
+        return (
+            self.registry
+            .get_all_keys()
+        )
 
-    # -----------------------------------------------------
-    # Queue status
-    # -----------------------------------------------------
+    # =========================================================
+    # LLM QUEUE
+    # =========================================================
 
-    def get_queue_size(self) -> int:
-        """
-        Return the number of requests currently waiting for
-        capacity to free up.
-        """
+    def get_queue_size(
+        self,
+    ) -> int:
 
-        return self.request_queue.size()
+        return (
+            self.request_queue
+            .size()
+        )
+
+    # =========================================================
+    # WHISPER QUEUE
+    # =========================================================
+
+    def get_whisper_queue_size(
+        self,
+    ) -> int:
+
+        return (
+            self.whisper_client
+            .get_queue_size()
+        )
+
+    # =========================================================
+    # WHISPER STATUS
+    # =========================================================
+
+    def get_whisper_status(
+        self,
+    ):
+
+        return (
+            self.whisper_client
+            .get_status()
+        )
