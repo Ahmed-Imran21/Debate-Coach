@@ -13,6 +13,16 @@ class SessionManager:
     — the previous timestamp-based ID
     (session_%Y%m%d_%H%M%S, one-second resolution) could produce
     the same ID for two users starting within the same second.
+
+    Backend integration:
+        create_session() can take an externally-supplied
+        session_id (the backend's Postgres `sessions.id`, a
+        UUID) and user_id (the backend's `users.id`) so the local
+        session directory and the Postgres row represent the same
+        logical session under the same ID. If session_id is not
+        supplied, one is still generated locally exactly as
+        before — nothing about existing CLI/local-only usage
+        changes.
     """
 
     def __init__(self, base_directory="sessions"):
@@ -35,20 +45,46 @@ class SessionManager:
     # Create session
     # ---------------------------------
 
-    def create_session(self):
+    def create_session(self, session_id=None, user_id=None):
         """
         Create a new debate session.
+
+        Parameters:
+            session_id (str, optional):
+                Use this exact ID instead of generating one.
+                Pass the backend's Postgres `sessions.id` here so
+                the local session directory and the Postgres row
+                refer to the same session.
+
+            user_id (str, optional):
+                Owning user's ID (the backend's `users.id`).
+                Required later if you plan to call
+                session.sync_artifacts_to_storage().
 
         Returns:
             Session:
                 A newly created Session object.
+
+        Raises:
+            FileExistsError:
+                If session_id is supplied and a session with that
+                ID already exists on disk.
         """
 
-        session_id = f"session_{uuid4().hex}"
+        if session_id is None:
+            session_id = f"session_{uuid4().hex}"
+
+        elif (self.base_directory / session_id).exists():
+
+            raise FileExistsError(
+                f"A session directory already exists for "
+                f"session_id '{session_id}'."
+            )
 
         session = Session(
             session_id=session_id,
-            base_directory=self.base_directory
+            base_directory=self.base_directory,
+            user_id=user_id,
         )
 
         session.create_directory()
