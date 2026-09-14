@@ -3,17 +3,28 @@ from session_manager import SessionManager
 from api.client import APIClient
 
 from coaching_engine.engine import CoachingEngine
+
 from coaching_engine.utils.result_writer import (
     save_coaching_results,
 )
 
 from audio.recorder import record_audio
-from audio.transcriber import transcribe_audio
-from audio.audio_analyzer import analyze_audio
 
-from raw_metrics.metrics import analyze_metrics
+from audio.transcriber import (
+    transcribe_audio,
+)
 
-from speech_analysis.speech_analyzer import analyze_speech
+from audio.audio_analyzer import (
+    analyze_audio,
+)
+
+from raw_metrics.metrics import (
+    analyze_metrics,
+)
+
+from speech_analysis.speech_analyzer import (
+    analyze_speech,
+)
 
 
 def run_session():
@@ -22,51 +33,57 @@ def run_session():
 
     One APIClient is created for the entire session.
 
-    This means speech analysis and coaching analysis share
-    the exact same:
-        - API key registry
-        - rate limiter
-        - scheduler
-        - usage tracker
-        - provider pool
-        - waiting queue
+    The APIClient owns:
 
-    If no key has capacity when a request comes in, it is
-    queued and serviced automatically in the background rather
-    than failing outright.
+        - LLM API key pool
+        - LLM scheduler
+        - LLM queue
+        - Whisper API key pool
+        - Whisper queue
     """
 
-    # -----------------------------------------------------
-    # 0. Create shared API client
-    # -----------------------------------------------------
-
-    print("\nInitializing API system...")
+    print(
+        "\nInitializing API system..."
+    )
 
     api_client = APIClient()
 
     print(
-        f"Loaded {len(api_client.get_keys())} API keys."
+        f"Loaded "
+        f"{len(api_client.get_keys())} "
+        f"LLM API keys."
+    )
+
+    print(
+        f"Loaded "
+        f"{len(api_client.get_whisper_status())} "
+        f"Whisper API keys."
     )
 
     try:
-        _run_session_body(api_client)
+
+        _run_session_body(
+            api_client
+        )
+
     finally:
-        # ---------------------------------------------------
-        # Always stop the background queue worker cleanly,
-        # even if the session raised an error.
-        # ---------------------------------------------------
+
         api_client.shutdown()
 
 
-def _run_session_body(api_client):
+def _run_session_body(
+    api_client,
+):
 
-    # -----------------------------------------------------
-    # 1. Create session
-    # -----------------------------------------------------
+    # =====================================================
+    # 1. CREATE SESSION
+    # =====================================================
 
     manager = SessionManager()
 
-    session = manager.create_session()
+    session = (
+        manager.create_session()
+    )
 
     print(
         f"\nSession created: "
@@ -80,11 +97,13 @@ def _run_session_body(api_client):
 
     session.start()
 
-    # -----------------------------------------------------
-    # 2. Record audio
-    # -----------------------------------------------------
+    # =====================================================
+    # 2. RECORD AUDIO
+    # =====================================================
 
-    print("\nStarting recording...")
+    print(
+        "\nStarting recording..."
+    )
 
     record_audio(
         session.session_directory
@@ -97,16 +116,26 @@ def _run_session_body(api_client):
         f"{session.audio_path}"
     )
 
-    # -----------------------------------------------------
-    # 3. Transcribe audio
-    # -----------------------------------------------------
+    # =====================================================
+    # 3. TRANSCRIBE
+    # =====================================================
 
-    print("\nTranscribing audio...")
+    print(
+        "\nTranscribing audio..."
+    )
 
-    transcription_path, transcription = transcribe_audio(
-        session.audio_path,
-        session.session_id,
-        session.session_directory,
+    (
+        transcription_path,
+        transcription,
+    ) = transcribe_audio(
+        audio_path=session.audio_path,
+        session_id=session.session_id,
+        session_directory=(
+            session.session_directory
+        ),
+        whisper_client=(
+            api_client.whisper_client
+        ),
     )
 
     session.finish_transcription()
@@ -116,16 +145,23 @@ def _run_session_body(api_client):
         f"{transcription_path}"
     )
 
-    # -----------------------------------------------------
-    # 4. Analyze audio
-    # -----------------------------------------------------
+    # =====================================================
+    # 4. AUDIO ANALYSIS
+    # =====================================================
 
-    print("\nAnalyzing audio...")
+    print(
+        "\nAnalyzing audio..."
+    )
 
-    analysis_path, analysis = analyze_audio(
-        session.audio_path,
-        session.session_id,
-        session.session_directory,
+    (
+        analysis_path,
+        analysis,
+    ) = analyze_audio(
+        audio_path=session.audio_path,
+        session_id=session.session_id,
+        session_directory=(
+            session.session_directory
+        ),
     )
 
     session.finish_analysis()
@@ -135,15 +171,18 @@ def _run_session_body(api_client):
         f"{analysis_path}"
     )
 
-    # -----------------------------------------------------
-    # 5. Calculate raw speech metrics
-    # -----------------------------------------------------
+    # =====================================================
+    # 5. RAW SPEECH METRICS
+    # =====================================================
 
     print(
         "\nCalculating raw speech metrics..."
     )
 
-    raw_metrics_path, raw_metrics = analyze_metrics(
+    (
+        raw_metrics_path,
+        raw_metrics,
+    ) = analyze_metrics(
         session.session_id,
         session.session_directory,
     )
@@ -153,15 +192,22 @@ def _run_session_body(api_client):
         f"{raw_metrics_path}"
     )
 
-    # -----------------------------------------------------
-    # 6. Analyze semantic speech content
-    # -----------------------------------------------------
+    # =====================================================
+    # 6. SEMANTIC SPEECH ANALYSIS
+    # =====================================================
 
-    print("\nAnalyzing speech content...")
+    print(
+        "\nAnalyzing speech content..."
+    )
 
-    speech_content_path, speech_content = analyze_speech(
+    (
+        speech_content_path,
+        speech_content,
+    ) = analyze_speech(
         session_id=session.session_id,
-        session_directory=session.session_directory,
+        session_directory=(
+            session.session_directory
+        ),
         api_client=api_client,
     )
 
@@ -170,9 +216,9 @@ def _run_session_body(api_client):
         f"{speech_content_path}"
     )
 
-    # -----------------------------------------------------
-    # 7. Run Coaching Engine
-    # -----------------------------------------------------
+    # =====================================================
+    # 7. COACHING ENGINE
+    # =====================================================
 
     print(
         "\nStarting coaching analysis..."
@@ -183,27 +229,32 @@ def _run_session_body(api_client):
         api_client=api_client,
     )
 
-    feedback, scores = (
-        coaching_engine.analyze_session(
-            session_id=session.session_id
-        )
+    (
+        feedback,
+        scores,
+    ) = coaching_engine.analyze_session(
+        session_id=session.session_id
     )
 
     print(
         "\nCoaching analysis completed."
     )
 
-    # -----------------------------------------------------
-    # 8. Save coaching results
-    # -----------------------------------------------------
+    # =====================================================
+    # 8. SAVE COACHING RESULTS
+    # =====================================================
 
-    print("\nSaving coaching results...")
+    print(
+        "\nSaving coaching results..."
+    )
 
-    feedback_path = save_coaching_results(
-        session_id=session.session_id,
-        feedback=feedback,
-        scores=scores,
-        sessions_dir="sessions",
+    feedback_path = (
+        save_coaching_results(
+            session_id=session.session_id,
+            feedback=feedback,
+            scores=scores,
+            sessions_dir="sessions",
+        )
     )
 
     print(
@@ -211,13 +262,21 @@ def _run_session_body(api_client):
         f"{feedback_path}"
     )
 
-    # -----------------------------------------------------
-    # Display coaching scores
-    # -----------------------------------------------------
+    # =====================================================
+    # DISPLAY SCORES
+    # =====================================================
 
-    print("\n========================================")
-    print("COACHING SCORES")
-    print("========================================")
+    print(
+        "\n========================================"
+    )
+
+    print(
+        "COACHING SCORES"
+    )
+
+    print(
+        "========================================"
+    )
 
     print(
         f"Quantitative:   "
@@ -249,25 +308,39 @@ def _run_session_body(api_client):
         f"{scores.categories.logic:.2f}"
     )
 
-    print("----------------------------------------")
+    print(
+        "----------------------------------------"
+    )
 
     print(
         f"Overall:        "
         f"{scores.overall:.2f}"
     )
 
-    # -----------------------------------------------------
-    # Display coaching feedback
-    # -----------------------------------------------------
+    # =====================================================
+    # DISPLAY FEEDBACK
+    # =====================================================
 
-    print("\n========================================")
-    print("COACHING FEEDBACK")
-    print("========================================")
+    print(
+        "\n========================================"
+    )
+
+    print(
+        "COACHING FEEDBACK"
+    )
+
+    print(
+        "========================================"
+    )
 
     if not feedback:
-        print("\nNo coaching feedback generated.")
+
+        print(
+            "\nNo coaching feedback generated."
+        )
 
     else:
+
         for item in feedback:
 
             print(
@@ -286,34 +359,48 @@ def _run_session_body(api_client):
             )
 
             if item.evidence:
-                print("Evidence:")
+
+                print(
+                    "Evidence:"
+                )
 
                 for evidence in item.evidence:
+
                     print(
                         f"  - {evidence}"
                     )
 
             if item.explanation:
+
                 print(
                     f"Explanation: "
                     f"{item.explanation}"
                 )
 
             if item.recommendation:
+
                 print(
                     f"Recommendation: "
                     f"{item.recommendation}"
                 )
 
-    # -----------------------------------------------------
-    # 9. Complete session
-    # -----------------------------------------------------
+    # =====================================================
+    # COMPLETE
+    # =====================================================
 
     session.complete()
 
-    print("\n========================================")
-    print("SESSION COMPLETED")
-    print("========================================")
+    print(
+        "\n========================================"
+    )
+
+    print(
+        "SESSION COMPLETED"
+    )
+
+    print(
+        "========================================"
+    )
 
     print(
         f"Session ID:        "
@@ -360,7 +447,9 @@ def _run_session_body(api_client):
         f"{scores.overall:.2f}"
     )
 
-    print("========================================\n")
+    print(
+        "========================================\n"
+    )
 
 
 if __name__ == "__main__":
