@@ -1,5 +1,7 @@
 import json
 
+from typing import Callable, Optional
+
 from api.client import APIClient
 
 from .schemas import SpeechAnalysisResponse
@@ -11,18 +13,13 @@ class LLMClient:
     Compatibility wrapper for speech analysis.
 
     The actual API key selection, rate limiting, reservation,
-    provider selection, and usage tracking are handled by the
-    centralized APIClient.
-
-    This class remains here so the existing speech-analysis
-    code does not need to change.
+    provider selection, usage tracking, and waiting queue are
+    handled by the centralized APIClient.
     """
 
     PROVIDER = "groq"
     MODEL = "openai/gpt-oss-120b"
 
-    # Conservative estimate used by the scheduler.
-    # Actual token usage is reconciled after the request.
     ESTIMATED_OUTPUT_TOKENS = 4000
 
     def __init__(self, api_client=None):
@@ -32,18 +29,26 @@ class LLMClient:
         Args:
             api_client:
                 Optional shared APIClient.
-
-                The application should eventually create one
-                APIClient and pass the same instance to all
-                LLM clients.
         """
 
         self.api_client = api_client or APIClient()
 
-    def analyze_speech(self, session_id, transcript):
+    def analyze_speech(
+        self,
+        session_id,
+        transcript,
+        on_queued: Optional[Callable[[float], None]] = None,
+    ):
         """
         Analyze a transcript and return a validated
         SpeechAnalysisResponse.
+
+        Args:
+            on_queued:
+                Optional callback invoked with the estimated
+                wait time (seconds) if this request has to wait
+                for API capacity. Forwarded to
+                APIClient.generate().
         """
 
         if not session_id:
@@ -52,15 +57,7 @@ class LLMClient:
         if not transcript or not transcript.strip():
             raise ValueError("transcript cannot be empty.")
 
-        # -------------------------------------------------
-        # Build prompt
-        # -------------------------------------------------
-
         prompt = build_analysis_prompt(transcript)
-
-        # -------------------------------------------------
-        # Estimate tokens for the scheduler
-        # -------------------------------------------------
 
         estimated_input_tokens = max(
             1,
@@ -71,10 +68,6 @@ class LLMClient:
             estimated_input_tokens
             + self.ESTIMATED_OUTPUT_TOKENS
         )
-
-        # -------------------------------------------------
-        # Request through centralized APIClient
-        # -------------------------------------------------
 
         response = self.api_client.generate(
             task="speech_analysis",
@@ -93,11 +86,8 @@ class LLMClient:
             ],
             max_tokens=self.ESTIMATED_OUTPUT_TOKENS,
             temperature=0.0,
+            on_queued=on_queued,
         )
-
-        # -------------------------------------------------
-        # Handle API failure
-        # -------------------------------------------------
 
         if not response.success:
             raise RuntimeError(
@@ -110,10 +100,6 @@ class LLMClient:
                 "LLM returned an empty response."
             )
 
-        # -------------------------------------------------
-        # Parse JSON
-        # -------------------------------------------------
-
         try:
             data = json.loads(response.content)
 
@@ -122,16 +108,8 @@ class LLMClient:
                 "LLM returned invalid JSON for speech analysis."
             ) from exc
 
-        # -------------------------------------------------
-        # Remove optional session_id if the model returns it
-        # -------------------------------------------------
-
         if isinstance(data, dict):
             data.pop("session_id", None)
-
-        # -------------------------------------------------
-        # Validate against project schema
-        # -------------------------------------------------
 
         try:
             parsed_response = (

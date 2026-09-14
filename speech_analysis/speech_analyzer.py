@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from typing import Callable, Optional
+
 from api.client import APIClient
 
 from .llm.client import LLMClient
@@ -12,20 +14,6 @@ from .llm.response_parser import parse_and_validate
 # ---------------------------------------------------------
 
 def load_transcription(transcription_path):
-    """
-    Load transcription.json from disk.
-
-    Parameters
-    ----------
-    transcription_path : str or Path
-        Path to transcription.json.
-
-    Returns
-    -------
-    dict
-        Loaded transcription data.
-    """
-
     transcription_path = Path(transcription_path)
 
     if not transcription_path.exists():
@@ -49,21 +37,6 @@ def load_transcription(transcription_path):
 # ---------------------------------------------------------
 
 def prepare_transcript(transcription):
-    """
-    Convert transcription.json into a timestamped text format
-    suitable for the LLM.
-
-    Parameters
-    ----------
-    transcription : dict
-        Loaded transcription data.
-
-    Returns
-    -------
-    str
-        Timestamped transcript.
-    """
-
     transcript_parts = []
 
     for segment in transcription["segments"]:
@@ -95,18 +68,6 @@ def prepare_transcript(transcription):
 # ---------------------------------------------------------
 
 def save_speech_content(speech_content, output_path):
-    """
-    Save SpeechContent as speech_content.json.
-
-    Parameters
-    ----------
-    speech_content : SpeechContent
-        Parsed semantic analysis.
-
-    output_path : str or Path
-        Destination path.
-    """
-
     output_path = Path(output_path)
 
     with open(output_path, "w", encoding="utf-8") as file:
@@ -128,48 +89,16 @@ def analyze_speech(
     session_id,
     session_directory,
     api_client=None,
+    on_queued: Optional[Callable[[float], None]] = None,
 ):
     """
     Perform semantic LLM analysis for a session.
 
-    Pipeline:
-
-        transcription.json
-              ↓
-        prepare transcript
-              ↓
-        centralized APIClient
-              ↓
-        API scheduler
-              ↓
-        selected API key
-              ↓
-        LLM
-              ↓
-        structured response
-              ↓
-        parse + validate
-              ↓
-        speech_content.json
-
-    Parameters
-    ----------
-    session_id : str
-        ID of the current session.
-
-    session_directory : str or Path
-        Directory containing the session files.
-
-    api_client : APIClient, optional
-        Shared centralized APIClient.
-
-        main.py should create ONE APIClient and pass the same
-        instance throughout the entire session.
-
-    Returns
-    -------
-    tuple
-        (output_path, speech_content)
+    Args:
+        on_queued:
+            Optional callback invoked with the estimated wait
+            time (seconds) if this request has to wait for API
+            capacity. Forwarded down to APIClient.generate().
     """
 
     session_directory = Path(session_directory)
@@ -182,19 +111,11 @@ def analyze_speech(
         session_directory / "speech_content.json"
     )
 
-    # -----------------------------------------------------
-    # Load transcription
-    # -----------------------------------------------------
-
     print("\nLoading transcription...")
 
     transcription = load_transcription(
         transcription_path
     )
-
-    # -----------------------------------------------------
-    # Prepare transcript
-    # -----------------------------------------------------
 
     print("Preparing transcript...")
 
@@ -202,30 +123,19 @@ def analyze_speech(
         transcription
     )
 
-    # -----------------------------------------------------
-    # Create LLM client using shared APIClient
-    # -----------------------------------------------------
-
     print("Initializing LLM client...")
 
     client = LLMClient(
         api_client=api_client
     )
 
-    # -----------------------------------------------------
-    # Analyze speech
-    # -----------------------------------------------------
-
     print("Sending transcript to LLM...")
 
     response = client.analyze_speech(
         session_id=session_id,
-        transcript=transcript
+        transcript=transcript,
+        on_queued=on_queued,
     )
-
-    # -----------------------------------------------------
-    # Parse and validate
-    # -----------------------------------------------------
 
     print("Parsing LLM response...")
 
@@ -233,10 +143,6 @@ def analyze_speech(
         response,
         session_id
     )
-
-    # -----------------------------------------------------
-    # Save result
-    # -----------------------------------------------------
 
     print("Saving semantic analysis...")
 
