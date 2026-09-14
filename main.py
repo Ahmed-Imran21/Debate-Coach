@@ -29,6 +29,11 @@ def run_session():
         - scheduler
         - usage tracker
         - provider pool
+        - waiting queue
+
+    If no key has capacity when a request comes in, it is
+    queued and serviced automatically in the background rather
+    than failing outright.
     """
 
     # -----------------------------------------------------
@@ -42,6 +47,18 @@ def run_session():
     print(
         f"Loaded {len(api_client.get_keys())} API keys."
     )
+
+    try:
+        _run_session_body(api_client)
+    finally:
+        # ---------------------------------------------------
+        # Always stop the background queue worker cleanly,
+        # even if the session raised an error.
+        # ---------------------------------------------------
+        api_client.shutdown()
+
+
+def _run_session_body(api_client):
 
     # -----------------------------------------------------
     # 1. Create session

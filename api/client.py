@@ -1,11 +1,19 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
 from .config import build_registry
-from .models import APIRequest, APIResponse
+from .models import (
+    APIKey,
+    APIRequest,
+    APIReservation,
+    APIResponse,
+    QueuedRequest,
+)
 from .rate_limiter import RateLimiter
 from .scheduler import APIScheduler
 from .usage_tracker import UsageTracker
+from .request_queue import RequestQueue
+from .queue_worker import QueueWorker
 
 from .providers.groq import GroqProvider
 from .providers.gemini import GeminiProvider
@@ -24,9 +32,15 @@ class APIClient:
         - record actual usage
         - handle provider failures
         - handle rate-limit errors
+        - queue requests when no key currently has capacity, and
+          service them in the background as capacity frees up
 
     The application should create ONE APIClient and share
-    that instance with all components that need an LLM.
+    that instance with all components that need an LLM. This
+    is what makes concurrent multi-user usage safe: every
+    session's requests compete for capacity through the same
+    registry/rate limiter/scheduler/queue, instead of each
+    session tracking its own (incorrect) view of quota.
     """
 
     def __init__(self):
@@ -49,6 +63,15 @@ class APIClient:
         )
 
         # -------------------------------------------------
+        # Waiting queue for requests with no available capacity
+        # -------------------------------------------------
+
+        self.request_queue = RequestQueue()
+
+        self.queue_worker = QueueWorker(self)
+        self.queue_worker.start()
+
+        # -------------------------------------------------
         # Provider adapters
         # -------------------------------------------------
 
@@ -56,6 +79,20 @@ class APIClient:
             "groq": GroqProvider(),
             "gemini": GeminiProvider(),
         }
+
+    # -----------------------------------------------------
+    # Shutdown
+    # -----------------------------------------------------
+
+    def shutdown(self) -> None:
+        """
+        Stop the background queue worker.
+
+        Call this when the application (or server) is exiting
+        so the worker thread does not linger.
+        """
+
+        self.queue_worker.stop()
 
     # -----------------------------------------------------
     # Generate
@@ -72,12 +109,50 @@ class APIClient:
         system_instruction: Optional[str] = None,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
+        wait_if_queued: bool = True,
+        max_wait_seconds: Optional[float] = None,
+        on_queued: Optional[Callable[[float], None]] = None,
     ) -> APIResponse:
         """
         Execute one LLM request through the centralized
         scheduler.
 
-        The scheduler decides which API key should be used.
+        The scheduler decides which API key should be used,
+        honoring `provider`/`model` as a preference when given,
+        or considering every enabled key when not.
+
+        If no key currently has enough capacity, the request is
+        placed on a waiting queue instead of failing outright.
+
+        Args:
+            wait_if_queued:
+                If True (default), this call blocks until the
+                queued request completes or max_wait_seconds
+                elapses, then returns the final APIResponse.
+
+                If False, the call returns immediately with
+                success=False, queued=True, and
+                estimated_wait_seconds set, without blocking.
+                Use this from an async server that wants to
+                notify the user of an ETA and poll or receive
+                a callback separately, rather than holding a
+                request thread open.
+
+            max_wait_seconds:
+                Maximum time to block waiting for a queued
+                request when wait_if_queued=True. None means
+                wait indefinitely.
+
+            on_queued:
+                Optional callback invoked with the estimated
+                wait time in seconds, the moment a request is
+                queued (before any blocking happens). Useful
+                for surfacing an ETA to the user immediately.
+
+        Returns:
+            An APIResponse. When the request was queued, check
+            `.queued` and `.estimated_wait_seconds` in addition
+            to `.success`.
         """
 
         if estimated_tokens < 0:
@@ -100,38 +175,100 @@ class APIClient:
             estimated_requests=1,
         )
 
+        call_kwargs: Dict[str, Any] = {
+            "messages": messages,
+            "prompt": prompt,
+            "system_instruction": system_instruction,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+
         # -------------------------------------------------
-        # Reserve capacity
+        # Try to reserve capacity immediately
         # -------------------------------------------------
 
-        reservation = self.scheduler.acquire(
-            request
-        )
+        reservation = self.scheduler.acquire(request)
 
-        if reservation is None:
+        if reservation is not None:
+
+            api_key = self.scheduler.get_reserved_key(
+                reservation
+            )
+
+            return self._execute_request(
+                request=request,
+                reservation=reservation,
+                api_key=api_key,
+                call_kwargs=call_kwargs,
+            )
+
+        # -------------------------------------------------
+        # No key currently has capacity.
+        # Queue instead of failing outright.
+        # -------------------------------------------------
+
+        estimated_wait = self.scheduler.estimate_wait(request)
+
+        if on_queued is not None:
+            on_queued(estimated_wait)
+
+        if not wait_if_queued:
+
             return APIResponse(
                 request_id=request_id,
                 api_key_id="",
                 success=False,
+                queued=True,
+                estimated_wait_seconds=estimated_wait,
                 error=(
-                    "No API key currently has enough "
-                    "available capacity."
+                    "No API key currently has enough available "
+                    "capacity. Request has been queued."
                 ),
             )
 
-        # -------------------------------------------------
-        # Get selected key
-        # -------------------------------------------------
-
-        api_key = (
-            self.scheduler.get_reserved_key(
-                reservation
-            )
+        queued_request = QueuedRequest(
+            request=request,
+            call_kwargs=call_kwargs,
+            estimated_wait_seconds=estimated_wait,
         )
 
-        # -------------------------------------------------
-        # Find provider adapter
-        # -------------------------------------------------
+        self.request_queue.put(queued_request)
+
+        completed = queued_request.event.wait(
+            timeout=max_wait_seconds
+        )
+
+        if not completed:
+
+            return APIResponse(
+                request_id=request_id,
+                api_key_id="",
+                success=False,
+                queued=True,
+                estimated_wait_seconds=estimated_wait,
+                error=(
+                    "Timed out waiting for available API "
+                    "capacity."
+                ),
+            )
+
+        return queued_request.response
+
+    # -----------------------------------------------------
+    # Execute a reserved request against its provider
+    #
+    # Extracted so both the immediate path above and
+    # QueueWorker (for requests that had to wait) can share
+    # the exact same execution + bookkeeping logic.
+    # -----------------------------------------------------
+
+    def _execute_request(
+        self,
+        request: APIRequest,
+        reservation: APIReservation,
+        api_key: APIKey,
+        call_kwargs: Dict[str, Any],
+    ) -> APIResponse:
 
         provider_adapter = self.providers.get(
             api_key.provider
@@ -144,7 +281,7 @@ class APIClient:
             )
 
             return APIResponse(
-                request_id=request_id,
+                request_id=request.request_id,
                 api_key_id=api_key.id,
                 success=False,
                 error=(
@@ -153,9 +290,13 @@ class APIClient:
                 ),
             )
 
-        # -------------------------------------------------
-        # Execute provider request
-        # -------------------------------------------------
+        messages = call_kwargs.get("messages")
+        prompt = call_kwargs.get("prompt")
+        system_instruction = call_kwargs.get(
+            "system_instruction"
+        )
+        max_tokens = call_kwargs.get("max_tokens")
+        temperature = call_kwargs.get("temperature")
 
         try:
 
@@ -210,7 +351,7 @@ class APIClient:
             )
 
             return APIResponse(
-                request_id=request_id,
+                request_id=request.request_id,
                 api_key_id=api_key.id,
                 success=True,
                 content=result.get("content"),
@@ -237,7 +378,7 @@ class APIClient:
                 )
 
                 return APIResponse(
-                    request_id=request_id,
+                    request_id=request.request_id,
                     api_key_id=api_key.id,
                     success=False,
                     error=(
@@ -257,7 +398,7 @@ class APIClient:
             )
 
             return APIResponse(
-                request_id=request_id,
+                request_id=request.request_id,
                 api_key_id=api_key.id,
                 success=False,
                 error=error_message,
@@ -408,3 +549,15 @@ class APIClient:
         """
 
         return self.registry.get_all_keys()
+
+    # -----------------------------------------------------
+    # Queue status
+    # -----------------------------------------------------
+
+    def get_queue_size(self) -> int:
+        """
+        Return the number of requests currently waiting for
+        capacity to free up.
+        """
+
+        return self.request_queue.size()

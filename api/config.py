@@ -66,6 +66,11 @@ def load_api_keys() -> list[APIKey]:
         GROQ_GPT_OSS_120B_KEY_3=...
 
     Adding KEY_4 requires no code changes.
+
+    The provider and model are encoded directly in the
+    variable name (and therefore in the resulting APIKey.id),
+    so callers can later request a specific model by name and
+    the scheduler will only consider matching keys.
     """
 
     api_keys = []
@@ -103,6 +108,43 @@ def load_api_keys() -> list[APIKey]:
 
 
 # ---------------------------------------------------------
+# Validation
+# ---------------------------------------------------------
+
+def validate_env_keys() -> None:
+    """
+    Verify that .env actually contains variables matching at
+    least one KEY_CONFIGS entry.
+
+    This exists because a naming mismatch between .env and
+    KEY_CONFIGS silently produces zero keys, which otherwise
+    only surfaces as a generic "no keys found" error with no
+    indication of *why*. This gives an actionable message
+    listing exactly which variable names are expected.
+    """
+
+    api_keys = load_api_keys()
+
+    if api_keys:
+        return
+
+    expected_examples = [
+        f"{config_name}_KEY_1"
+        for config_name in KEY_CONFIGS
+    ]
+
+    raise RuntimeError(
+        "No API keys were found in the environment.\n\n"
+        "Expected variable names look like:\n"
+        + "\n".join(f"  {name}" for name in expected_examples)
+        + "\n\n"
+        "Check that your .env file uses these exact prefixes "
+        "(provider + model), not a generic name like "
+        "GROQ_API_KEY_1."
+    )
+
+
+# ---------------------------------------------------------
 # Registry builder
 # ---------------------------------------------------------
 
@@ -111,15 +153,11 @@ def build_registry() -> APIKeyRegistry:
     Load all API keys and place them into the central registry.
     """
 
+    validate_env_keys()
+
     registry = APIKeyRegistry()
 
     api_keys = load_api_keys()
-
-    if not api_keys:
-        raise RuntimeError(
-            "No API keys were found. "
-            "Check your .env file."
-        )
 
     for api_key in api_keys:
         registry.add_key(api_key)

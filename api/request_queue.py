@@ -2,17 +2,20 @@ from collections import deque
 from threading import Condition
 from typing import Optional
 
-from .models import APIRequest
+from .models import QueuedRequest
 
 
 class RequestQueue:
     """
-    Thread-safe queue for pending API requests.
+    Thread-safe FIFO queue for requests waiting on API capacity.
 
-    Requests are added to the queue when they cannot immediately
-    be assigned to an API key.
+    A request lands here when the scheduler could not
+    immediately find a key with enough capacity. QueueWorker
+    drains this queue in the background, retrying acquire() for
+    each item until one succeeds.
 
-    The queue is intentionally independent of providers and API keys.
+    The queue is intentionally independent of providers and API
+    keys.
     """
 
     def __init__(self):
@@ -23,13 +26,13 @@ class RequestQueue:
     # ADD
     # ============================================================
 
-    def put(self, request: APIRequest) -> None:
+    def put(self, queued_request: QueuedRequest) -> None:
         """
         Add a request to the end of the queue.
         """
 
         with self._condition:
-            self._queue.append(request)
+            self._queue.append(queued_request)
             self._condition.notify()
 
     # ============================================================
@@ -39,7 +42,7 @@ class RequestQueue:
     def get(
         self,
         timeout: Optional[float] = None,
-    ) -> Optional[APIRequest]:
+    ) -> Optional[QueuedRequest]:
         """
         Remove and return the next request.
 
@@ -47,7 +50,7 @@ class RequestQueue:
         available or until timeout expires.
 
         Returns:
-            APIRequest if available.
+            QueuedRequest if available.
             None if timeout expires.
         """
 
@@ -68,7 +71,7 @@ class RequestQueue:
     # NON-BLOCKING GET
     # ============================================================
 
-    def get_nowait(self) -> Optional[APIRequest]:
+    def get_nowait(self) -> Optional[QueuedRequest]:
         """
         Return the next request immediately.
 
@@ -86,7 +89,7 @@ class RequestQueue:
     # PEEK
     # ============================================================
 
-    def peek(self) -> Optional[APIRequest]:
+    def peek(self) -> Optional[QueuedRequest]:
         """
         Look at the next request without removing it.
         """

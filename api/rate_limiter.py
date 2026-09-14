@@ -361,6 +361,210 @@ class RateLimiter:
             )
 
     # ============================================================
+    # ESTIMATED WAIT TIME
+    # ============================================================
+
+    def time_until_available(
+        self,
+        api_key: APIKey,
+        estimated_tokens: int,
+        estimated_requests: int = 1,
+    ) -> float:
+        """
+        Estimate how many seconds until this key could handle a
+        request of this size, if it cannot handle it right now.
+
+        Returns 0.0 if the key can already handle it.
+
+        Returns float("inf") if the key is disabled or if daily
+        limits are the binding constraint (waiting won't help
+        until the next UTC day).
+
+        This is a best-effort estimate based on when currently
+        counted usage will age out of the rolling 60-second
+        window (for RPM/TPM) or reset at UTC midnight (for
+        RPD/TPD). It does not guarantee that no one else reserves
+        the freed-up capacity first.
+        """
+
+        with self._lock:
+
+            if not api_key.enabled:
+                return float("inf")
+
+            self._cleanup_events(api_key)
+
+            now = datetime.utcnow()
+
+            wait_seconds = 0.0
+
+            # ----------------------------------------------------
+            # Cooldown
+            # ----------------------------------------------------
+
+            if api_key.cooldown_until is not None:
+
+                if now < api_key.cooldown_until:
+                    wait_seconds = max(
+                        wait_seconds,
+                        (
+                            api_key.cooldown_until - now
+                        ).total_seconds(),
+                    )
+
+            # ----------------------------------------------------
+            # Daily limits
+            #
+            # If the daily cap is the binding constraint, no
+            # amount of short waiting helps. The key is only
+            # available again after UTC midnight.
+            # ----------------------------------------------------
+
+            daily_requests, daily_tokens = (
+                self._get_daily_usage(api_key)
+            )
+
+            projected_daily_requests = (
+                daily_requests
+                + api_key.usage.active_requests
+                + estimated_requests
+            )
+
+            projected_daily_tokens = (
+                daily_tokens
+                + api_key.usage.reserved_tokens
+                + estimated_tokens
+            )
+
+            if (
+                projected_daily_requests > api_key.limits.rpd
+                or projected_daily_tokens > api_key.limits.tpd
+            ):
+
+                tomorrow = (
+                    self._start_of_today()
+                    + timedelta(days=1)
+                )
+
+                return max(
+                    wait_seconds,
+                    (tomorrow - now).total_seconds(),
+                )
+
+            # ----------------------------------------------------
+            # Minute-window limits (RPM / TPM)
+            #
+            # Walk through events in the current 60-second window,
+            # oldest first, and find the point at which enough of
+            # them will have aged out to cover the excess.
+            # ----------------------------------------------------
+
+            events = self._get_events(api_key)
+
+            cutoff = now - self.MINUTE_WINDOW
+
+            window_events = sorted(
+                (
+                    event
+                    for event in events
+                    if event.timestamp > cutoff
+                ),
+                key=lambda event: event.timestamp,
+            )
+
+            minute_requests, minute_tokens = (
+                self._get_minute_usage(api_key)
+            )
+
+            projected_minute_requests = (
+                minute_requests
+                + api_key.usage.active_requests
+                + estimated_requests
+            )
+
+            projected_minute_tokens = (
+                minute_tokens
+                + api_key.usage.reserved_tokens
+                + estimated_tokens
+            )
+
+            minute_wait = 0.0
+
+            if projected_minute_requests > api_key.limits.rpm:
+
+                excess = (
+                    projected_minute_requests
+                    - api_key.limits.rpm
+                )
+
+                accumulated = 0
+                found = False
+
+                for event in window_events:
+
+                    accumulated += event.requests
+
+                    if accumulated >= excess:
+
+                        free_at = (
+                            event.timestamp
+                            + self.MINUTE_WINDOW
+                        )
+
+                        minute_wait = max(
+                            minute_wait,
+                            (free_at - now).total_seconds(),
+                        )
+
+                        found = True
+                        break
+
+                if not found:
+                    minute_wait = max(
+                        minute_wait,
+                        self.MINUTE_WINDOW.total_seconds(),
+                    )
+
+            if projected_minute_tokens > api_key.limits.tpm:
+
+                excess = (
+                    projected_minute_tokens
+                    - api_key.limits.tpm
+                )
+
+                accumulated = 0
+                found = False
+
+                for event in window_events:
+
+                    accumulated += event.tokens
+
+                    if accumulated >= excess:
+
+                        free_at = (
+                            event.timestamp
+                            + self.MINUTE_WINDOW
+                        )
+
+                        minute_wait = max(
+                            minute_wait,
+                            (free_at - now).total_seconds(),
+                        )
+
+                        found = True
+                        break
+
+                if not found:
+                    minute_wait = max(
+                        minute_wait,
+                        self.MINUTE_WINDOW.total_seconds(),
+                    )
+
+            wait_seconds = max(wait_seconds, minute_wait)
+
+            return max(0.0, wait_seconds)
+
+    # ============================================================
     # RESERVATION
     # ============================================================
 
