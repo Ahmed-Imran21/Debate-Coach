@@ -1,5 +1,5 @@
 from pathlib import Path
-from datetime import datetime
+from uuid import uuid4
 
 from session import Session
 
@@ -7,6 +7,12 @@ from session import Session
 class SessionManager:
     """
     Responsible for creating and managing debate sessions.
+
+    Session IDs are UUID-based so that concurrent session
+    creation from multiple simultaneous users can never collide
+    — the previous timestamp-based ID
+    (session_%Y%m%d_%H%M%S, one-second resolution) could produce
+    the same ID for two users starting within the same second.
     """
 
     def __init__(self, base_directory="sessions"):
@@ -20,7 +26,6 @@ class SessionManager:
 
         self.base_directory = Path(base_directory)
 
-        # Make sure the main sessions directory exists
         self.base_directory.mkdir(
             parents=True,
             exist_ok=True
@@ -39,21 +44,14 @@ class SessionManager:
                 A newly created Session object.
         """
 
-        # Generate a unique session ID
-        session_id = datetime.now().strftime(
-            "session_%Y%m%d_%H%M%S"
-        )
+        session_id = f"session_{uuid4().hex}"
 
-        # Create the Session object
         session = Session(
             session_id=session_id,
             base_directory=self.base_directory
         )
 
-        # Create the session's directory
         session.create_directory()
-
-        # Save initial session metadata
         session.save()
 
         print()
@@ -69,7 +67,6 @@ class SessionManager:
     # ---------------------------------
     # Load existing session
     # ---------------------------------
-
 
     def load_session(self, session_id):
         """
@@ -100,7 +97,6 @@ class SessionManager:
                 f"does not exist."
             )
 
-        # Load the session from its saved metadata
         session = Session.load(
             session_id=session_id,
             base_directory=self.base_directory
@@ -158,54 +154,6 @@ class SessionManager:
         return sessions
 
 
-
-
-@classmethod
-def load(cls, session_id, base_directory="sessions"):
-    """
-    Load an existing session from session.json.
-
-    Parameters:
-        session_id (str):
-            ID of the session to load.
-
-        base_directory (str or Path):
-            Root directory where all sessions are stored.
-
-    Returns:
-        Session:
-            Session object reconstructed from session.json.
-    """
-
-    session = cls(
-        session_id=session_id,
-        base_directory=base_directory
-    )
-
-    if not session.session_json_path.exists():
-
-        raise FileNotFoundError(
-            f"session.json for session "
-            f"'{session_id}' does not exist."
-        )
-
-    with open(
-        session.session_json_path,
-        "r",
-        encoding="utf-8"
-    ) as file:
-
-        session_data = json.load(file)
-
-    # Restore saved session information
-    session.created_at = datetime.fromisoformat(
-        session_data["created_at"]
-    )
-
-    session.status = session_data["status"]
-
-    return session
-
 # ---------------------------------
 # Test Session Manager
 # ---------------------------------
@@ -214,14 +162,12 @@ if __name__ == "__main__":
 
     manager = SessionManager()
 
-    # Create a new session
     session = manager.create_session()
 
     print()
     print("Session object:")
     print(session)
 
-    # Check whether the session exists
     exists = manager.session_exists(
         session.session_id
     )
@@ -231,7 +177,6 @@ if __name__ == "__main__":
         f"Session exists: {exists}"
     )
 
-    # List all sessions
     sessions = manager.list_sessions()
 
     print()

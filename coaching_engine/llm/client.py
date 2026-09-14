@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Callable, Optional
 
 from api.client import APIClient
 
@@ -6,19 +6,11 @@ from api.client import APIClient
 class LLMClient:
     """
     Compatibility wrapper for the coaching engine.
-
-    The actual API key selection, rate limiting, reservation,
-    provider selection, and usage tracking are handled by the
-    centralized APIClient.
-
-    Prompt construction and response parsing remain in the
-    coaching_engine package.
     """
 
     DEFAULT_PROVIDER = "groq"
     DEFAULT_MODEL = "openai/gpt-oss-120b"
 
-    # Conservative scheduler estimate.
     ESTIMATED_OUTPUT_TOKENS = 2500
 
     def __init__(
@@ -26,17 +18,6 @@ class LLMClient:
         api_client: Optional[APIClient] = None,
         model: str = DEFAULT_MODEL,
     ):
-        """
-        Initialize the coaching LLM client.
-
-        Args:
-            api_client:
-                Optional shared APIClient.
-
-            model:
-                Model to request from the scheduler.
-        """
-
         self.api_client = api_client or APIClient()
 
         self.provider = self.DEFAULT_PROVIDER
@@ -48,34 +29,19 @@ class LLMClient:
         user_prompt: str,
         response_schema: dict,
         temperature: float = 0.2,
+        on_queued: Optional[Callable[[float], None]] = None,
     ) -> str:
         """
         Send a coaching request through the centralized
         API system.
 
         Args:
-            system_prompt:
-                Instructions defining the model's role.
-
-            user_prompt:
-                The actual coaching analysis request.
-
-            response_schema:
-                Project response schema.
-
-                Response validation remains in the existing
-                coaching-engine parser.
-
-            temperature:
-                Controls response randomness.
-
-        Returns:
-            Raw JSON response string.
+            on_queued:
+                Optional callback invoked with the estimated
+                wait time (seconds) if this request has to wait
+                for API capacity. Forwarded to
+                APIClient.generate().
         """
-
-        # -------------------------------------------------
-        # Validate inputs
-        # -------------------------------------------------
 
         if (
             not isinstance(system_prompt, str)
@@ -98,10 +64,6 @@ class LLMClient:
                 "response_schema must be a dictionary."
             )
 
-        # -------------------------------------------------
-        # Estimate input tokens
-        # -------------------------------------------------
-
         estimated_input_tokens = max(
             1,
             len(system_prompt + user_prompt) // 4,
@@ -111,10 +73,6 @@ class LLMClient:
             estimated_input_tokens
             + self.ESTIMATED_OUTPUT_TOKENS
         )
-
-        # -------------------------------------------------
-        # Request through centralized APIClient
-        # -------------------------------------------------
 
         response = self.api_client.generate(
             task="coaching_analysis",
@@ -133,11 +91,8 @@ class LLMClient:
             ],
             max_tokens=self.ESTIMATED_OUTPUT_TOKENS,
             temperature=temperature,
+            on_queued=on_queued,
         )
-
-        # -------------------------------------------------
-        # Handle API failure
-        # -------------------------------------------------
 
         if not response.success:
             raise RuntimeError(
@@ -149,12 +104,5 @@ class LLMClient:
             raise ValueError(
                 "LLM returned an empty response."
             )
-
-        # -------------------------------------------------
-        # Return raw JSON string
-        #
-        # The existing coaching-engine parser will handle
-        # validation and conversion.
-        # -------------------------------------------------
 
         return response.content.strip()

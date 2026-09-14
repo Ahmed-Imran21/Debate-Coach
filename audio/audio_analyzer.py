@@ -1,4 +1,7 @@
 import json
+import os
+import queue
+
 from pathlib import Path
 
 import torch
@@ -14,16 +17,46 @@ SAMPLE_RATE = 16000
 MIN_SPEECH_DURATION_MS = 250
 MIN_SILENCE_DURATION_MS = 300
 
+# Mirrors the Whisper pool in audio/transcriber.py: bounds true
+# concurrency to a fixed number of warm model instances instead
+# of either serializing every call behind one lock or loading a
+# fresh model per request.
+VAD_POOL_SIZE = int(os.environ.get("VAD_POOL_SIZE", "2"))
+
 
 # ---------------------------------
-# Load VAD model
+# Model pool
 # ---------------------------------
 
-print("Loading Silero VAD model...")
+class _VadModelPool:
+    """
+    Thread-safe pool of preloaded Silero VAD model instances.
+    """
 
-vad_model = load_silero_vad()
+    def __init__(self, size: int):
 
-print("Silero VAD model loaded.")
+        if size < 1:
+            raise ValueError(
+                "VAD_POOL_SIZE must be at least 1."
+            )
+
+        self._pool: "queue.Queue" = queue.Queue()
+
+        print(f"Loading {size} Silero VAD model instance(s)...")
+
+        for _ in range(size):
+            self._pool.put(load_silero_vad())
+
+        print("Silero VAD model pool ready.")
+
+    def acquire(self):
+        return self._pool.get()
+
+    def release(self, model) -> None:
+        self._pool.put(model)
+
+
+_vad_pool = _VadModelPool(VAD_POOL_SIZE)
 
 
 # ---------------------------------
@@ -52,13 +85,11 @@ def analyze_audio(audio_path, session_id, session_directory):
     audio_path = Path(audio_path)
     session_directory = Path(session_directory)
 
-    # Make sure the session directory exists
     session_directory.mkdir(
         parents=True,
         exist_ok=True
     )
 
-    # Analysis belongs to this session
     output_path = session_directory / "analysis.json"
 
     print()
@@ -77,13 +108,21 @@ def analyze_audio(audio_path, session_id, session_directory):
     # Detect speech
     # ---------------------------------
 
-    speech_timestamps = get_speech_timestamps(
-        audio,
-        vad_model,
-        sampling_rate=sample_rate,
-        min_speech_duration_ms=MIN_SPEECH_DURATION_MS,
-        min_silence_duration_ms=MIN_SILENCE_DURATION_MS
-    )
+    vad_model = _vad_pool.acquire()
+
+    try:
+
+        speech_timestamps = get_speech_timestamps(
+            audio,
+            vad_model,
+            sampling_rate=sample_rate,
+            min_speech_duration_ms=MIN_SPEECH_DURATION_MS,
+            min_silence_duration_ms=MIN_SILENCE_DURATION_MS
+        )
+
+    finally:
+
+        _vad_pool.release(vad_model)
 
     # ---------------------------------
     # Convert sample positions to seconds
@@ -245,25 +284,21 @@ def load_audio(audio_path):
 
         audio_bytes = wav_file.readframes(frame_count)
 
-    # Our recorder produces 16-bit PCM audio.
     if sample_width != 2:
         raise ValueError(
             f"Expected 16-bit WAV audio, "
             f"but found {sample_width * 8}-bit audio."
         )
 
-    # Convert raw bytes → NumPy int16 array
     audio = np.frombuffer(
         audio_bytes,
         dtype=np.int16
     )
 
-    # Convert int16 → float32
     audio = audio.astype(
         np.float32
     ) / 32768.0
 
-    # Convert stereo → mono if necessary
     if channels > 1:
 
         audio = audio.reshape(
@@ -276,14 +311,10 @@ def load_audio(audio_path):
             axis=1
         )
 
-    # Convert NumPy → PyTorch tensor
     audio = torch.from_numpy(
         audio
     )
 
-    # Our recorder already uses 16 kHz.
-    # Keep this check so the analyzer knows
-    # what format it received.
     if sample_rate != SAMPLE_RATE:
 
         raise ValueError(

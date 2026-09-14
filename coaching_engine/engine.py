@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Callable, Optional
 
 from api.client import APIClient
 
@@ -26,11 +26,12 @@ class CoachingEngine:
         sessions_dir: str = "sessions",
         llm_client: Optional[LLMClient] = None,
         api_client: Optional[APIClient] = None,
+        on_queued: Optional[Callable[[float], None]] = None,
     ):
         self.sessions_dir = sessions_dir
 
-        # If an LLMClient was explicitly supplied, use it.
-        # Otherwise create one using the shared APIClient.
+        self.on_queued = on_queued
+
         if llm_client is not None:
             self.llm_client = llm_client
         else:
@@ -89,6 +90,7 @@ class CoachingEngine:
                 user_prompt=argumentation_prompt,
                 response_schema={},
                 temperature=0.2,
+                on_queued=self.on_queued,
             )
         )
 
@@ -108,6 +110,7 @@ class CoachingEngine:
                 user_prompt=rebuttal_prompt,
                 response_schema={},
                 temperature=0.2,
+                on_queued=self.on_queued,
             )
         )
 
@@ -127,6 +130,7 @@ class CoachingEngine:
                 user_prompt=structure_prompt,
                 response_schema={},
                 temperature=0.2,
+                on_queued=self.on_queued,
             )
         )
 
@@ -146,6 +150,7 @@ class CoachingEngine:
                 user_prompt=persuasion_prompt,
                 response_schema={},
                 temperature=0.2,
+                on_queued=self.on_queued,
             )
         )
 
@@ -165,6 +170,7 @@ class CoachingEngine:
                 user_prompt=logic_prompt,
                 response_schema={},
                 temperature=0.2,
+                on_queued=self.on_queued,
             )
         )
 
