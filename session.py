@@ -10,12 +10,12 @@ from datetime import datetime
 # STATUS CONSTANTS
 # ============================================================
 #
-# Extends the original CLI lifecycle (created -> recording ->
-# recorded -> transcribed -> analyzed -> completed) with the
-# additional stages the server pipeline goes through, plus a
-# transient "waiting_for_api_capacity" status surfaced whenever
-# every API key is temporarily out of capacity (see api/client.py
-# and QueuedRequest). "failed" can be reached from any stage.
+# Unchanged from your current file. Extends the original CLI
+# lifecycle (created -> recording -> recorded -> transcribed ->
+# analyzed -> completed) with the additional stages the server
+# pipeline goes through, plus a transient
+# "waiting_for_api_capacity" status. "failed" can be reached
+# from any stage.
 
 STATUS_CREATED = "created"
 STATUS_RECORDING = "recording"            # CLI flow only
@@ -34,6 +34,30 @@ STATUS_WAITING_FOR_API_CAPACITY = "waiting_for_api_capacity"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
 
+# Maps every granular local status onto the coarser status
+# vocabulary the new multi-platform backend's Postgres
+# `sessions` table uses (app/models/session.py: SessionStatus).
+# Used only by to_backend_status() below — purely a reporting
+# translation, does not change local behavior.
+_BACKEND_STATUS_MAP = {
+    STATUS_CREATED: "created",
+    STATUS_RECORDING: "created",
+    STATUS_RECORDED: "uploaded",
+    STATUS_UPLOADED: "uploaded",
+    STATUS_TRANSCRIBING: "uploaded",
+    STATUS_TRANSCRIBED: "transcribed",
+    STATUS_ANALYZING_AUDIO: "transcribed",
+    STATUS_ANALYZED: "analyzed",
+    STATUS_CALCULATING_METRICS: "analyzed",
+    STATUS_METRICS_CALCULATED: "analyzed",
+    STATUS_ANALYZING_SPEECH: "analyzed",
+    STATUS_SPEECH_ANALYZED: "debate_analyzed",
+    STATUS_COACHING: "debate_analyzed",
+    STATUS_WAITING_FOR_API_CAPACITY: "debate_analyzed",
+    STATUS_COMPLETED: "completed",
+    STATUS_FAILED: "failed",
+}
+
 
 class Session:
     """
@@ -47,21 +71,41 @@ class Session:
         session.json atomically (write to a temp file, then
         os.replace) so a concurrent reader never sees a partially
         written file.
+
+    Backend integration:
+        `session_id` and `user_id` can be supplied by the caller
+        (e.g. the FastAPI backend, which already created the
+        Postgres row and knows its UUID and owning user) instead
+        of being generated locally. This lets one Session object
+        represent the exact same session as a Postgres row and a
+        set of S3/R2 object keys, so local pipeline output can be
+        pushed to the same storage the backend reads from — see
+        object_key_for() and sync_artifacts_to_storage() below.
     """
 
-    def __init__(self, session_id, base_directory="sessions"):
+    def __init__(self, session_id, base_directory="sessions", user_id=None):
         """
         Create a new Session object.
 
         Parameters:
             session_id (str):
-                Unique ID for this debate session.
+                Unique ID for this debate session. Pass the same
+                UUID the backend's Postgres `sessions` row uses
+                to keep local disk and cloud storage in sync for
+                the same logical session.
 
             base_directory (str or Path):
                 Root directory where all sessions are stored.
+
+            user_id (str, optional):
+                Owning user's ID (the backend's Postgres `users.id`).
+                Required only if you plan to call
+                sync_artifacts_to_storage() — local-only/CLI usage
+                can leave this as None.
         """
 
         self.session_id = session_id
+        self.user_id = user_id
 
         # Root directory containing all sessions
         self.base_directory = Path(base_directory)
@@ -116,6 +160,10 @@ class Session:
         # Populated while status == waiting_for_api_capacity.
         self.estimated_wait_seconds = None
 
+        # Set by sync_artifacts_to_storage() once artifacts have
+        # been pushed to object storage.
+        self.synced_to_storage = False
+
         # Guards all mutation + save() below.
         self._lock = threading.RLock()
 
@@ -151,6 +199,7 @@ class Session:
 
             session_data = {
                 "session_id": self.session_id,
+                "user_id": self.user_id,
 
                 "created_at": (
                     self.created_at.isoformat()
@@ -167,6 +216,8 @@ class Session:
                 "estimated_wait_seconds": (
                     self.estimated_wait_seconds
                 ),
+
+                "synced_to_storage": self.synced_to_storage,
 
                 "files": {
                     "audio": self.audio_path.name,
@@ -243,6 +294,8 @@ class Session:
 
             session_data = json.load(file)
 
+        session.user_id = session_data.get("user_id")
+
         session.created_at = datetime.fromisoformat(
             session_data["created_at"]
         )
@@ -260,6 +313,10 @@ class Session:
 
         session.estimated_wait_seconds = session_data.get(
             "estimated_wait_seconds"
+        )
+
+        session.synced_to_storage = session_data.get(
+            "synced_to_storage", False
         )
 
         return session
@@ -406,6 +463,107 @@ class Session:
                     self.estimated_wait_seconds
                 ),
             }
+
+    def to_backend_status(self):
+        """
+        Translate this session's granular local status into the
+        coarser SessionStatus vocabulary used by the backend's
+        Postgres `sessions` table (app/models/session.py). Pure
+        reporting helper — does not change local status.
+        """
+
+        return _BACKEND_STATUS_MAP.get(self.status, "failed")
+
+    # ---------------------------------
+    # Object storage integration
+    # ---------------------------------
+
+    def object_key_for(self, filename):
+        """
+        Build the object-storage key for a given filename using
+        the EXACT same scheme as the backend's
+        app/services/storage.build_object_key(): users/{user_id}
+        /sessions/{session_id}/{filename}. Requires user_id to be
+        set (i.e. this session was created by/for a signed-in
+        backend user, not a bare local CLI session).
+        """
+
+        if self.user_id is None:
+            raise ValueError(
+                "Cannot build an object storage key: this "
+                "session has no user_id. Pass user_id= when "
+                "creating the Session, or when calling "
+                "SessionManager.create_session()."
+            )
+
+        return f"users/{self.user_id}/sessions/{self.session_id}/{filename}"
+
+    def sync_artifacts_to_storage(self):
+        """
+        Upload every artifact file that currently exists on disk
+        for this session to the same S3-compatible bucket the
+        backend reads from, using object_key_for() so the keys
+        line up exactly with what
+        app/services/storage.build_object_key() produces on the
+        backend side.
+
+        Configured via the SAME environment variables as the
+        backend's .env: STORAGE_ENDPOINT_URL,
+        STORAGE_ACCESS_KEY_ID, STORAGE_SECRET_ACCESS_KEY,
+        STORAGE_BUCKET_NAME. Requires `boto3` (add it to this
+        repo's requirements alongside the existing dependencies).
+
+        This does NOT create or update the Postgres `sessions`
+        row — that still happens through the backend's own API
+        (e.g. POST /sessions/{id}/analyze once artifacts are in
+        place). This method only gets the files into the bucket.
+        """
+
+        import boto3
+
+        client = boto3.client(
+            "s3",
+            endpoint_url=os.environ["STORAGE_ENDPOINT_URL"],
+            aws_access_key_id=os.environ["STORAGE_ACCESS_KEY_ID"],
+            aws_secret_access_key=os.environ["STORAGE_SECRET_ACCESS_KEY"],
+        )
+        bucket = os.environ["STORAGE_BUCKET_NAME"]
+
+        candidate_paths = {
+            "recording.wav": self.audio_path,
+            "transcription.json": self.transcription_path,
+            "analysis.json": self.analysis_path,
+            "raw_metrics.json": self.raw_metrics_path,
+            "speech_content.json": self.speech_content_path,
+            "feedback.json": self.feedback_path,
+        }
+
+        uploaded = []
+
+        for filename, local_path in candidate_paths.items():
+
+            if not local_path.exists():
+                continue
+
+            content_type = (
+                "audio/wav" if filename.endswith(".wav") else "application/json"
+            )
+
+            with open(local_path, "rb") as file:
+                client.put_object(
+                    Bucket=bucket,
+                    Key=self.object_key_for(filename),
+                    Body=file.read(),
+                    ContentType=content_type,
+                )
+
+            uploaded.append(filename)
+
+        with self._lock:
+            self.synced_to_storage = True
+            self.save()
+
+        return uploaded
 
     # ---------------------------------
     # Representation
