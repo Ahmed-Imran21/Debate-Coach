@@ -88,11 +88,38 @@ class APIClient:
         """
         Stop the background queue worker.
 
-        Call this when the application (or server) is exiting
-        so the worker thread does not linger.
+        Any requests still waiting in the queue at this point are
+        drained and given a failure response so that any caller
+        blocked in generate() (waiting on QueuedRequest.event)
+        wakes up immediately instead of hanging forever — once
+        the worker is stopped, nothing else will ever service
+        them or set their event.
         """
 
         self.queue_worker.stop()
+
+        while True:
+
+            queued_request = self.request_queue.get_nowait()
+
+            if queued_request is None:
+                break
+
+            queued_request.response = APIResponse(
+                request_id=queued_request.request.request_id,
+                api_key_id="",
+                success=False,
+                queued=True,
+                estimated_wait_seconds=(
+                    queued_request.estimated_wait_seconds
+                ),
+                error=(
+                    "APIClient is shutting down; queued "
+                    "request was cancelled."
+                ),
+            )
+
+            queued_request.event.set()
 
     # -----------------------------------------------------
     # Generate
