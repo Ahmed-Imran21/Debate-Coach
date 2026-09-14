@@ -16,6 +16,8 @@ class APIScheduler:
     - rank them by available capacity
     - atomically reserve capacity
     - release/commit reservations
+    - estimate how long a request would have to wait if no
+      key currently has capacity
 
     It does NOT make API calls.
     """
@@ -98,6 +100,41 @@ class APIScheduler:
         # -------------------------------------------------
 
         return None
+
+    # -----------------------------------------------------
+    # Estimated wait time
+    # -----------------------------------------------------
+
+    def estimate_wait(
+        self,
+        request: APIRequest,
+    ) -> float:
+        """
+        Estimate, in seconds, how long until the soonest
+        compatible key could handle this request.
+
+        Returns 0.0 if some key can already handle it right now
+        (this can happen if capacity freed up between the failed
+        acquire() and this call).
+
+        Returns float("inf") if no key is compatible at all
+        (e.g. a provider/model preference that no enabled key
+        matches).
+        """
+
+        candidates = self._get_candidates(request)
+
+        if not candidates:
+            return float("inf")
+
+        return min(
+            self.rate_limiter.time_until_available(
+                key,
+                request.estimated_tokens,
+                request.estimated_requests,
+            )
+            for key in candidates
+        )
 
     # -----------------------------------------------------
     # Candidate selection

@@ -1,5 +1,7 @@
+import threading
+
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Dict, Optional
 from datetime import datetime
 
 
@@ -175,3 +177,44 @@ class APIResponse:
     status_code: Optional[int] = None
 
     completed_at: datetime = field(default_factory=datetime.utcnow)
+
+    # Whether this response came from a request that had to
+    # wait in the queue for capacity (whether it eventually
+    # succeeded, failed, or timed out while waiting).
+    queued: bool = False
+
+    # Best-effort estimate, in seconds, of how long the request
+    # was expected to wait for capacity when it was queued.
+    estimated_wait_seconds: Optional[float] = None
+
+
+# ============================================================
+# QUEUED REQUEST
+# ============================================================
+
+@dataclass
+class QueuedRequest:
+    """
+    Represents one request waiting in RequestQueue for capacity
+    to free up on some compatible API key.
+
+    Holds everything needed to execute the request once a key
+    becomes available (call_kwargs), plus an Event the original
+    caller can block on until the QueueWorker fills in the
+    response and sets it.
+    """
+
+    request: APIRequest
+
+    # The provider-call arguments (messages / prompt / etc.)
+    # that generate() received, needed to actually execute the
+    # request once a key becomes available.
+    call_kwargs: Dict[str, Any]
+
+    submitted_at: datetime = field(default_factory=datetime.utcnow)
+
+    estimated_wait_seconds: float = 0.0
+
+    event: threading.Event = field(default_factory=threading.Event)
+
+    response: Optional[APIResponse] = None
