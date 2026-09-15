@@ -12,6 +12,53 @@ SEVERITY_PRIORITY = {
 }
 
 
+# ============================================================
+# SCORING MODEL
+#
+# The previous formula was additive on raw counts:
+#
+#     50 + positive*15 - high*20 - medium*10 - low*5
+#
+# which saturates. A category that produced four positive
+# observations scored 110 and clamped to 100; a category that
+# produced three high-severity issues scored -10 and clamped to
+# 0. On a real session that meant every qualitative category
+# read 100 and delivery read 0, regardless of the speech.
+#
+# This version works on ratios instead of counts, so the number
+# of observations a module happens to emit does not move the
+# score on its own. Only the mix of observations does.
+#
+# A category with nothing but positive observations lands at
+# POSITIVE_CEILING rather than 100. A perfect score is not
+# something a coaching tool should hand out, and leaving
+# headroom keeps the number honest.
+# ============================================================
+
+NEUTRAL_BASE = 50.0
+POSITIVE_WEIGHT = 35.0
+PENALTY_WEIGHT = 55.0
+
+POSITIVE_CEILING = NEUTRAL_BASE + POSITIVE_WEIGHT
+
+# How much each issue severity counts against the category,
+# relative to one high-severity issue.
+SEVERITY_PENALTY = {
+    "high": 1.0,
+    "medium": 0.6,
+    "low": 0.3,
+}
+
+SCORED_CATEGORIES = (
+    "quantitative",
+    "argumentation",
+    "rebuttal",
+    "structure",
+    "persuasion",
+    "logic",
+)
+
+
 def aggregate_feedback(
     feedback: List[FeedbackItem],
 ) -> List[FeedbackItem]:
@@ -65,82 +112,56 @@ def calculate_category_scores(
     """
     Calculate category scores from feedback.
 
-    Scores are currently based on the severity of generated
-    feedback items.
-
-    This is intentionally simple for now. The scoring formula
-    can be refined after evaluating real debate sessions.
+    A category with no observations scores NEUTRAL_BASE rather
+    than zero. Absence of feedback is absence of signal, not
+    evidence of a bad performance, and scoring it as zero
+    dragged the overall score down whenever a module had
+    nothing to say.
 
     Returns:
         CategoryScores containing scores from 0 to 100.
     """
 
-    categories = {
-        "quantitative": [],
-        "argumentation": [],
-        "rebuttal": [],
-        "structure": [],
-        "persuasion": [],
-        "logic": [],
+    buckets: Dict[str, List[FeedbackItem]] = {
+        category: []
+        for category in SCORED_CATEGORIES
     }
 
     for item in feedback:
-        if item.category in categories:
-            categories[item.category].append(item)
+        if item.category in buckets:
+            buckets[item.category].append(item)
 
     scores: Dict[str, float] = {}
 
-    for category, items in categories.items():
+    for category, items in buckets.items():
 
         if not items:
-            scores[category] = 0.0
+            scores[category] = NEUTRAL_BASE
             continue
 
-        positive = sum(
+        total = len(items)
+
+        positives = sum(
             1
             for item in items
             if item.severity == "positive"
         )
 
-        high = sum(
-            1
+        penalty = sum(
+            SEVERITY_PENALTY.get(item.severity, 0.0)
             for item in items
-            if item.severity == "high"
         )
-
-        medium = sum(
-            1
-            for item in items
-            if item.severity == "medium"
-        )
-
-        low = sum(
-            1
-            for item in items
-            if item.severity == "low"
-        )
-
-        total = len(items)
-
-        # Simple initial scoring model.
-        #
-        # Positive feedback improves the score.
-        # High severity issues have the largest penalty.
-        # Medium and low issues have smaller penalties.
-        #
-        # This formula is intentionally provisional.
 
         score = (
-            50
-            + (positive * 15)
-            - (high * 20)
-            - (medium * 10)
-            - (low * 5)
+            NEUTRAL_BASE
+            + POSITIVE_WEIGHT * (positives / total)
+            - PENALTY_WEIGHT * (penalty / total)
         )
 
-        score = max(0.0, min(100.0, score))
-
-        scores[category] = round(score, 2)
+        scores[category] = round(
+            max(0.0, min(POSITIVE_CEILING, score)),
+            1,
+        )
 
     return CategoryScores(
         quantitative=scores["quantitative"],
@@ -158,11 +179,9 @@ def calculate_overall_score(
     """
     Calculate the overall coaching score.
 
-    No final weighting has been established yet, so the initial
-    implementation uses an equal-weight average.
-
-    This weighting should be revisited once real sessions are
-    evaluated.
+    Equal weight across the six categories. Revisit the
+    weighting once there are enough real sessions to know which
+    categories actually predict a better speech.
     """
 
     values = [
@@ -179,7 +198,7 @@ def calculate_overall_score(
 
     return round(
         sum(values) / len(values),
-        2,
+        1,
     )
 
 

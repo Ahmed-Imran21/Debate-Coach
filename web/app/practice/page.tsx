@@ -1,0 +1,224 @@
+"use client";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactElement } from "react";
+
+import Recorder from "@/components/Recorder";
+import SiteFooter from "@/components/SiteFooter";
+import SiteHeader from "@/components/SiteHeader";
+import { formatClock } from "@/components/SpeechTrack";
+import {
+  ApiError,
+  clearTokens,
+  getAccessToken,
+  listSessions,
+} from "@/lib/api";
+import {
+  STATUS_LABEL,
+  TERMINAL,
+  type SessionSummary,
+} from "@/lib/types";
+
+const POLL_MS = 4000;
+
+export default function PracticePage(): ReactElement {
+  const router = useRouter();
+
+  const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const load = useCallback(async (): Promise<boolean> => {
+    try {
+      const rows = await listSessions();
+      setSessions(rows);
+      setError(null);
+
+      // Keep polling only while something is still moving.
+      return rows.some((row) => !TERMINAL.includes(row.status));
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        clearTokens();
+        router.replace("/login");
+        return false;
+      }
+
+      setError("Could not load your sessions. Retrying.");
+      return true;
+    }
+  }, [router]);
+
+  useEffect(() => {
+    if (!getAccessToken()) {
+      router.replace("/login");
+      return;
+    }
+
+    let cancelled = false;
+
+    const run = async () => {
+      const keepGoing = await load();
+      if (cancelled || !keepGoing) return;
+      timerRef.current = setTimeout(run, POLL_MS);
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, [load, router]);
+
+  function signOut(): void {
+    clearTokens();
+    router.replace("/");
+  }
+
+  return (
+    <div className="shell">
+      <SiteHeader variant="app" />
+
+      <main>
+        <section className="block-tight" style={{ paddingTop: "2.5rem" }}>
+          <div className="wrap">
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "baseline",
+                gap: "1rem",
+                flexWrap: "wrap",
+                marginBottom: "1.5rem",
+              }}
+            >
+              <h1 style={{ fontSize: "var(--step-4)" }}>Practice</h1>
+              <button className="filter" type="button" onClick={signOut}>
+                Sign out
+              </button>
+            </div>
+
+            <div style={{ maxWidth: "34rem" }}>
+              <Recorder />
+            </div>
+          </div>
+        </section>
+
+        <section className="block-tight" style={{ paddingBottom: "4rem" }}>
+          <div className="wrap">
+            <h2 style={{ fontSize: "var(--step-2)", marginBottom: "1rem" }}>
+              Your sessions
+            </h2>
+
+            {error && (
+              <p className="alert alert-quiet" role="status">
+                {error}
+              </p>
+            )}
+
+            {sessions === null && <p className="note">Loading.</p>}
+
+            {sessions !== null && sessions.length === 0 && (
+              <p className="note" style={{ maxWidth: "48ch" }}>
+                Nothing here yet. Record a speech above and it will appear
+                in this list while it is being analysed.
+              </p>
+            )}
+
+            {sessions !== null && sessions.length > 0 && (
+              <ul className="rows">
+                {sessions.map((session) => (
+                  <SessionRow key={session.id} session={session} />
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      </main>
+
+      <SiteFooter />
+    </div>
+  );
+}
+
+function SessionRow({
+  session,
+}: {
+  session: SessionSummary;
+}): ReactElement {
+  const done = session.status === "completed";
+  const failed = session.status === "failed";
+
+  const recorded = new Date(session.created_at).toLocaleDateString(
+    undefined,
+    { day: "numeric", month: "short", year: "numeric" },
+  );
+
+  const name = session.title || `Session of ${recorded}`;
+
+  const body = (
+    <>
+      <div>
+        <div className="row-title">{name}</div>
+
+        <div className="row-meta">
+          {done ? (
+            <>
+              {recorded}. {formatClock(session.duration_seconds ?? 0)} of
+              speech at {Math.round(session.words_per_minute ?? 0)} words
+              per minute.{" "}
+              {session.feedback_count ?? 0} findings.
+            </>
+          ) : failed ? (
+            <>{session.error_message ?? "Analysis failed."}</>
+          ) : (
+            <>
+              {STATUS_LABEL[session.status]}
+              {session.queue_wait_seconds
+                ? `. Waiting about ${Math.round(
+                    session.queue_wait_seconds,
+                  )} seconds for capacity.`
+                : "."}
+            </>
+          )}
+        </div>
+
+        {!done && !failed && (
+          <div className="progress" aria-hidden="true">
+            <div
+              className="progress-fill"
+              style={{ width: `${Math.round(session.progress * 100)}%` }}
+            />
+          </div>
+        )}
+      </div>
+
+      <div>
+        {done ? (
+          <span className="row-score">
+            {Math.round(session.overall_score ?? 0)}
+          </span>
+        ) : (
+          <span
+            className="state"
+            data-tone={failed ? "failed" : undefined}
+          >
+            {failed ? "Failed" : STATUS_LABEL[session.status]}
+          </span>
+        )}
+      </div>
+    </>
+  );
+
+  return (
+    <li className="row">
+      {done ? (
+        <Link href={`/practice/${session.id}`}>{body}</Link>
+      ) : (
+        <div>{body}</div>
+      )}
+    </li>
+  );
+}
