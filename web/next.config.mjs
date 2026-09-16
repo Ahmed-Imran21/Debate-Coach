@@ -13,7 +13,14 @@ const nextConfig = {
 
     const csp = [
       "default-src 'self'",
-      "script-src 'self'",
+      // 'unsafe-inline' is required: the App Router ships the RSC
+      // payload in inline <script> tags (self.__next_f.push(...)),
+      // and without a nonce the browser blocks every one of them,
+      // leaving the page hydrated with no data — a white screen.
+      // Hardening this further means issuing a per-request nonce
+      // from middleware, which opts every route into dynamic
+      // rendering.
+      "script-src 'self' 'unsafe-inline'",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data:",
       "font-src 'self'",
