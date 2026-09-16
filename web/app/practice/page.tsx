@@ -12,6 +12,7 @@ import { formatClock } from "@/components/SpeechTrack";
 import {
   ApiError,
   clearTokens,
+  deleteSession,
   getAccessToken,
   listSessions,
 } from "@/lib/api";
@@ -72,6 +73,12 @@ export default function PracticePage(): ReactElement {
     };
   }, [load, router]);
 
+  const handleDeleted = useCallback((id: string): void => {
+    setSessions((current) =>
+      current === null ? null : current.filter((row) => row.id !== id),
+    );
+  }, []);
+
   function signOut(): void {
     clearTokens();
     router.replace("/");
@@ -130,7 +137,11 @@ export default function PracticePage(): ReactElement {
             {sessions !== null && sessions.length > 0 && (
               <ul className="rows">
                 {sessions.map((session) => (
-                  <SessionRow key={session.id} session={session} />
+                  <SessionRow
+                    key={session.id}
+                    session={session}
+                    onDeleted={handleDeleted}
+                  />
                 ))}
               </ul>
             )}
@@ -145,9 +156,14 @@ export default function PracticePage(): ReactElement {
 
 function SessionRow({
   session,
+  onDeleted,
 }: {
   session: SessionSummary;
+  onDeleted: (id: string) => void;
 }): ReactElement {
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   const done = session.status === "completed";
   const failed = session.status === "failed";
 
@@ -212,12 +228,60 @@ function SessionRow({
     </>
   );
 
+  async function handleDelete(): Promise<void> {
+    if (
+      !window.confirm("Delete this session? This cannot be undone.")
+    ) {
+      return;
+    }
+
+    setDeleting(true);
+    setDeleteError(null);
+
+    try {
+      await deleteSession(session.id);
+      // Parent drops the row, unmounting this component, so
+      // nothing is set on state after this point.
+      onDeleted(session.id);
+    } catch (caught) {
+      setDeleteError(
+        caught instanceof ApiError && caught.status === 404
+          ? "That session was already gone."
+          : "Could not delete that session. Try again.",
+      );
+      setDeleting(false);
+    }
+  }
+
   return (
     <li className="row">
       {done ? (
         <Link href={`/practice/${session.id}`}>{body}</Link>
       ) : (
         <div>{body}</div>
+      )}
+
+      {/* Sibling of the link, never inside it: a button nested in
+          an anchor is invalid and the click would also navigate. */}
+      <button
+        type="button"
+        className="btn btn-quiet btn-sm"
+        data-tone="danger"
+        onClick={handleDelete}
+        disabled={deleting}
+        aria-label={`Delete ${name}`}
+      >
+        {deleting ? "Deleting." : "Delete"}
+      </button>
+
+      {deleteError && (
+        <p
+          className="alert alert-quiet"
+          role="status"
+          style={{ flexBasis: "100%", marginBottom: "1rem" }}
+        >
+          {deleteError}
+        </p>
       )}
     </li>
   );
