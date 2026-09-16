@@ -47,6 +47,17 @@ google-cloud-storage~=3.14.0
 groq~=0.11.0
 google-genai~=0.3.0
 
+# groq 0.11 builds its transport with httpx.Client(proxies=...),
+# and httpx removed that argument in 0.28 — leaving it unpinned
+# means every Groq() construction dies with
+# "TypeError: Client.__init__() got an unexpected keyword
+# argument 'proxies'" the moment a session starts analysis.
+# Lift this pin only together with a groq upgrade that drops the
+# proxies kwarg (verify api/providers/groq.py and api/whisper.py
+# still construct cleanly). google-genai 0.3 is unaffected either
+# way.
+httpx<0.28
+
 # --- Audio analysis ---
 silero-vad~=5.1.2
 numpy~=1.26.4
