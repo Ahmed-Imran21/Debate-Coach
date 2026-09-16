@@ -42,7 +42,10 @@ export default function SiteHeader({
           ) : (
             <>
               <Link href="/practice">Sessions</Link>
-              <Link href="/">About</Link>
+              {/* /about, not /: the landing page hands a signed-in
+                  reader a "Sign in" link and no way back to their
+                  sessions. */}
+              <Link href="/about">About</Link>
             </>
           )}
         </nav>
