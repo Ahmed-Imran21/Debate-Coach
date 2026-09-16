@@ -31,6 +31,12 @@ export default function PracticePage(): ReactElement {
   const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // A poll can still be in flight when the user navigates away, and
+  // fetch here is not abortable. Without this, a 401 landing after
+  // the move redirects them off whatever page they just opened,
+  // which reads as "clicking About signed me out".
+  const leftPageRef = useRef(false);
+
   const load = useCallback(async (): Promise<boolean> => {
     try {
       const rows = await listSessions();
@@ -40,6 +46,8 @@ export default function PracticePage(): ReactElement {
       // Keep polling only while something is still moving.
       return rows.some((row) => !TERMINAL.includes(row.status));
     } catch (caught) {
+      if (leftPageRef.current) return false;
+
       if (caught instanceof ApiError && caught.status === 401) {
         clearTokens();
         router.replace("/login");
@@ -52,6 +60,8 @@ export default function PracticePage(): ReactElement {
   }, [router]);
 
   useEffect(() => {
+    leftPageRef.current = false;
+
     if (!getAccessToken()) {
       router.replace("/login");
       return;
@@ -69,6 +79,7 @@ export default function PracticePage(): ReactElement {
 
     return () => {
       cancelled = true;
+      leftPageRef.current = true;
       if (timerRef.current !== null) clearTimeout(timerRef.current);
     };
   }, [load, router]);
