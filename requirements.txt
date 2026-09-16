@@ -23,8 +23,15 @@ python-dotenv~=1.0.1
 
 # --- Database ---
 SQLAlchemy~=2.0.35
-psycopg2-binary~=2.9.9
+psycopg[binary]~=3.3.0
 alembic~=1.13.3
+
+# Cloud SQL Python Connector. [pg8000] pulls in the matching
+# driver extra — the connector only supports pg8000/asyncpg/
+# pymysql/pytds, not psycopg, so the Cloud Run connection path
+# uses pg8000 while local/direct connections above use psycopg
+# (see app/db/database.py).
+cloud-sql-python-connector[pg8000]~=1.21.0
 
 # --- Auth ---
 python-jose[cryptography]~=3.3.0
@@ -32,7 +39,7 @@ passlib~=1.7.4
 bcrypt~=4.2.0
 
 # --- Object storage ---
-boto3~=1.35.0
+google-cloud-storage~=3.14.0
 
 # --- LLM and speech providers ---
 # Used by api/providers/ and api/whisper.py. The round-robin

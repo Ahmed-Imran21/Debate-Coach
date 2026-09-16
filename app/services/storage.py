@@ -1,27 +1,56 @@
+import datetime
 import json
 import uuid
 
 from pathlib import Path
 from typing import Any
 
-import boto3
-
-from botocore.client import Config
-from botocore.exceptions import ClientError
+from google.api_core.exceptions import NotFound
+from google.auth import default as google_auth_default
+from google.auth import impersonated_credentials
+from google.cloud import storage
 
 from app.core.config import settings
 
 
-_client = boto3.client(
-    "s3",
-    endpoint_url=settings.storage_endpoint_url,
-    aws_access_key_id=settings.storage_access_key_id,
-    aws_secret_access_key=settings.storage_secret_access_key,
-    region_name=settings.storage_region,
-    config=Config(signature_version="s3v4"),
-)
+_client = storage.Client(project=settings.gcp_project_id)
+_bucket = _client.bucket(settings.gcp_storage_bucket)
 
-_BUCKET = settings.storage_bucket_name
+
+def _resolve_signing_credentials():
+    """
+    Signed URLs need a private key. A downloaded service-account
+    key file (local dev, GOOGLE_APPLICATION_CREDENTIALS) already
+    has one. Cloud Run's attached runtime service account does
+    not, so there we self-impersonate through the IAM Credentials
+    API instead, which requires granting that same account
+    roles/iam.serviceAccountTokenCreator on itself (see
+    setup-gcp.sh).
+    """
+
+    credentials, _ = google_auth_default()
+
+    if hasattr(credentials, "sign_bytes"):
+        return credentials
+
+    if not settings.gcp_service_account_email:
+        raise RuntimeError(
+            "GCP_SERVICE_ACCOUNT_EMAIL must be set to generate "
+            "signed URLs when running without a service account "
+            "key file."
+        )
+
+    return impersonated_credentials.Credentials(
+        source_credentials=credentials,
+        target_principal=settings.gcp_service_account_email,
+        target_scopes=[
+            "https://www.googleapis.com/auth/devstorage.read_write"
+        ],
+        lifetime=3600,
+    )
+
+
+_signing_credentials = _resolve_signing_credentials()
 
 
 class ObjectNotFoundError(LookupError):
@@ -62,17 +91,19 @@ def generate_presigned_upload_url(
     client alongside the URL.
     """
 
-    return _client.generate_presigned_url(
-        "put_object",
-        Params={
-            "Bucket": _BUCKET,
-            "Key": object_key,
-            "ContentType": content_type,
-        },
-        ExpiresIn=(
-            expires_seconds
-            or settings.storage_url_expiry_seconds
+    blob = _bucket.blob(object_key)
+
+    return blob.generate_signed_url(
+        version="v4",
+        method="PUT",
+        content_type=content_type,
+        expiration=datetime.timedelta(
+            seconds=(
+                expires_seconds
+                or settings.storage_url_expiry_seconds
+            )
         ),
+        credentials=_signing_credentials,
     )
 
 
@@ -80,16 +111,18 @@ def generate_presigned_download_url(
     object_key: str,
     expires_seconds: int | None = None,
 ) -> str:
-    return _client.generate_presigned_url(
-        "get_object",
-        Params={
-            "Bucket": _BUCKET,
-            "Key": object_key,
-        },
-        ExpiresIn=(
-            expires_seconds
-            or settings.storage_url_expiry_seconds
+    blob = _bucket.blob(object_key)
+
+    return blob.generate_signed_url(
+        version="v4",
+        method="GET",
+        expiration=datetime.timedelta(
+            seconds=(
+                expires_seconds
+                or settings.storage_url_expiry_seconds
+            )
         ),
+        credentials=_signing_credentials,
     )
 
 
@@ -98,49 +131,19 @@ def generate_presigned_download_url(
 # ============================================================
 
 def object_exists(object_key: str) -> bool:
-
-    try:
-        _client.head_object(
-            Bucket=_BUCKET,
-            Key=object_key,
-        )
-
-    except ClientError as error:
-
-        code = error.response.get(
-            "Error",
-            {},
-        ).get("Code")
-
-        if code in ("404", "NoSuchKey", "NotFound"):
-            return False
-
-        raise
-
-    return True
+    return _bucket.blob(object_key).exists()
 
 
 def object_size(object_key: str) -> int:
+    blob = _bucket.blob(object_key)
 
     try:
-        response = _client.head_object(
-            Bucket=_BUCKET,
-            Key=object_key,
-        )
+        blob.reload()
 
-    except ClientError as error:
+    except NotFound as error:
+        raise ObjectNotFoundError(object_key) from error
 
-        code = error.response.get(
-            "Error",
-            {},
-        ).get("Code")
-
-        if code in ("404", "NoSuchKey", "NotFound"):
-            raise ObjectNotFoundError(object_key) from error
-
-        raise
-
-    return int(response["ContentLength"])
+    return blob.size
 
 
 # ============================================================
@@ -152,11 +155,9 @@ def upload_bytes(
     data: bytes,
     content_type: str = "application/octet-stream",
 ) -> None:
-    _client.put_object(
-        Bucket=_BUCKET,
-        Key=object_key,
-        Body=data,
-        ContentType=content_type,
+    _bucket.blob(object_key).upload_from_string(
+        data,
+        content_type=content_type,
     )
 
 
@@ -179,11 +180,9 @@ def upload_file(
     file_path: str | Path,
     content_type: str = "application/octet-stream",
 ) -> None:
-    _client.upload_file(
-        Filename=str(file_path),
-        Bucket=_BUCKET,
-        Key=object_key,
-        ExtraArgs={"ContentType": content_type},
+    _bucket.blob(object_key).upload_from_filename(
+        str(file_path),
+        content_type=content_type,
     )
 
 
@@ -194,24 +193,10 @@ def upload_file(
 def download_bytes(object_key: str) -> bytes:
 
     try:
-        response = _client.get_object(
-            Bucket=_BUCKET,
-            Key=object_key,
-        )
+        return _bucket.blob(object_key).download_as_bytes()
 
-    except ClientError as error:
-
-        code = error.response.get(
-            "Error",
-            {},
-        ).get("Code")
-
-        if code in ("404", "NoSuchKey", "NotFound"):
-            raise ObjectNotFoundError(object_key) from error
-
-        raise
-
-    return response["Body"].read()
+    except NotFound as error:
+        raise ObjectNotFoundError(object_key) from error
 
 
 def download_json(object_key: str) -> Any:
@@ -233,23 +218,12 @@ def download_file(
     )
 
     try:
-        _client.download_file(
-            Bucket=_BUCKET,
-            Key=object_key,
-            Filename=str(destination),
+        _bucket.blob(object_key).download_to_filename(
+            str(destination)
         )
 
-    except ClientError as error:
-
-        code = error.response.get(
-            "Error",
-            {},
-        ).get("Code")
-
-        if code in ("404", "NoSuchKey", "NotFound"):
-            raise ObjectNotFoundError(object_key) from error
-
-        raise
+    except NotFound as error:
+        raise ObjectNotFoundError(object_key) from error
 
     return destination
 
@@ -264,30 +238,11 @@ def delete_prefix(prefix: str) -> int:
     deletes a session.
     """
 
-    paginator = _client.get_paginator("list_objects_v2")
+    blobs = list(_client.list_blobs(_bucket, prefix=prefix))
 
-    deleted = 0
+    if not blobs:
+        return 0
 
-    for page in paginator.paginate(
-        Bucket=_BUCKET,
-        Prefix=prefix,
-    ):
+    _bucket.delete_blobs(blobs)
 
-        contents = page.get("Contents", [])
-
-        if not contents:
-            continue
-
-        _client.delete_objects(
-            Bucket=_BUCKET,
-            Delete={
-                "Objects": [
-                    {"Key": item["Key"]}
-                    for item in contents
-                ]
-            },
-        )
-
-        deleted += len(contents)
-
-    return deleted
+    return len(blobs)

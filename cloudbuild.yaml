@@ -1,0 +1,73 @@
+# Builds the backend image, pushes it to Artifact Registry, and
+# deploys it to Cloud Run.
+#
+# Run with:
+#   gcloud builds submit --config cloudbuild.yaml \
+#       --substitutions=_ENV_VARS_FILE=.env.production
+#
+# Environment variables are read from a plain KEY=VALUE file
+# (default .env.production, one per line, no quoting) and passed
+# to `gcloud run deploy` as a comma-separated --set-env-vars
+# list. Keep real secrets (JWT_SECRET_KEY, DB_PASSWORD, GROQ/
+# GEMINI keys, ...) out of that file in source control; for a
+# team setup, move them into Secret Manager and reference them
+# with --set-secrets instead.
+
+substitutions:
+  _REGION: us-central1
+  _SERVICE_NAME: debate-coach-backend
+  _REPOSITORY: debate-coach
+  _CLOUD_SQL_INSTANCE: debate-coach-508804:us-central1:debate-coach-db
+  _ENV_VARS_FILE: .env.production
+
+steps:
+  # --- Build ---
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - us-central1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA
+      - -t
+      - us-central1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:latest
+      - .
+
+  # --- Push ---
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - us-central1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}
+      - --all-tags
+
+  # --- Deploy ---
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+
+        if [ -f "${_ENV_VARS_FILE}" ]; then
+          ENV_VARS=$(grep -v '^#' "${_ENV_VARS_FILE}" | grep -v '^\s*$' | paste -sd, -)
+        else
+          echo "Warning: ${_ENV_VARS_FILE} not found, deploying with no env vars set."
+          ENV_VARS=""
+        fi
+
+        gcloud run deploy ${_SERVICE_NAME} \
+          --image us-central1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA \
+          --region ${_REGION} \
+          --platform managed \
+          --add-cloudsql-instances ${_CLOUD_SQL_INSTANCE} \
+          --set-env-vars "$ENV_VARS" \
+          --allow-unauthenticated \
+          --memory 2Gi \
+          --cpu 2 \
+          --timeout 300 \
+          --concurrency 4
+
+images:
+  - us-central1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA
+  - us-central1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
