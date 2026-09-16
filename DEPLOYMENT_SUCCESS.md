@@ -28,3 +28,9 @@
 - If frontend can't reach backend: verify NEXT_PUBLIC_API_URL matches the Cloud Run URL exactly
 - If database connection fails: check DB_PASSWORD in .env.production is correct
 - If CORS errors appear in the browser console: confirm the exact frontend origin is in the backend's ALLOWED_ORIGINS
+- If recordings fail to upload ("The recording could not be sent"): this is
+  usually the *bucket's* CORS policy, not the backend's ALLOWED_ORIGINS — the
+  browser PUTs straight to storage.googleapis.com. Check with:
+  `gcloud storage buckets describe gs://debate-coach-508804-recordings --format="json(cors_config)"`
+  It must list the frontend origin and allow PUT. `setup-gcp.sh` sets this
+  (see FRONTEND_ORIGIN); update it there if the domain changes.
