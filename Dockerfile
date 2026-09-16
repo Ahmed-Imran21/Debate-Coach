@@ -15,11 +15,17 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /srv
 
-# CPU-only torch first. The default wheel carries the CUDA
+# CPU-only torch (and torchaudio, pinned to the matching
+# version) first. The default PyPI wheels carry the CUDA
 # runtime, which adds roughly 2 GB to the image for no benefit
-# on a server that only runs the VAD model.
+# on a server that only runs the VAD model — and, for
+# torchaudio specifically, requires a libcudart.so this image
+# doesn't have at all, which breaks silero_vad's import at
+# build time (it depends on torchaudio with no upper bound, so
+# without this pin pip installs whatever the current default
+# GPU build is when requirements.txt is processed below).
 RUN pip install --index-url https://download.pytorch.org/whl/cpu \
-    "torch==2.4.1"
+    "torch==2.4.1" "torchaudio==2.4.1"
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt

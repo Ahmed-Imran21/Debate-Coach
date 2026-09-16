@@ -28,7 +28,7 @@ steps:
     args:
       - build
       - -t
-      - us-central1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA
+      - us-central1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$BUILD_ID
       - -t
       - us-central1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:latest
       - .
@@ -71,7 +71,7 @@ steps:
         fi
 
         gcloud run deploy ${_SERVICE_NAME} \
-          --image us-central1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA \
+          --image us-central1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$BUILD_ID \
           --region ${_REGION} \
           --platform managed \
           --add-cloudsql-instances ${_CLOUD_SQL_INSTANCE} \
@@ -83,8 +83,5 @@ steps:
           --concurrency 4
 
 images:
-  - us-central1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA
+  - us-central1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:$BUILD_ID
   - us-central1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE_NAME}:latest
-
-options:
-  logging: CLOUD_LOGGING_ONLY
