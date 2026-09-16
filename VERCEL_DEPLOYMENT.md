@@ -1,5 +1,9 @@
 # Vercel Frontend Deployment
 
+**Status: done.** Frontend is live at https://web-debate-coach1.vercel.app —
+see `DEPLOYMENT_SUCCESS.md` for the current state. Kept below as reference
+for future redeploys or a fresh environment.
+
 The backend is now running at: https://debate-coach-backend-7uc4kfztqq-uc.a.run.app
 
 ## Deploy web/ to Vercel
