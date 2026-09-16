@@ -6,12 +6,14 @@
 #       --substitutions=_ENV_VARS_FILE=.env.production
 #
 # Environment variables are read from a plain KEY=VALUE file
-# (default .env.production, one per line, no quoting) and passed
-# to `gcloud run deploy` as a comma-separated --set-env-vars
-# list. Keep real secrets (JWT_SECRET_KEY, DB_PASSWORD, GROQ/
-# GEMINI keys, ...) out of that file in source control; for a
-# team setup, move them into Secret Manager and reference them
-# with --set-secrets instead.
+# (default .env.production, one per line, no quoting), converted
+# to a YAML file, and passed to `gcloud run deploy` via
+# --env-vars-file (not --set-env-vars: several values here, e.g.
+# ALLOWED_ORIGINS, contain commas, which --set-env-vars would
+# misparse as separate keys). Keep real secrets (JWT_SECRET_KEY,
+# DB_PASSWORD, GROQ/GEMINI keys, ...) out of that file in source
+# control; for a team setup, move them into Secret Manager and
+# reference them with --set-secrets instead.
 
 substitutions:
   _REGION: us-central1
@@ -46,11 +48,26 @@ steps:
       - |
         set -euo pipefail
 
+        # $$ below is Cloud Build's escape for a literal $ — these
+        # are ordinary bash variables/expansions, not Cloud Build
+        # substitutions, and must survive Cloud Build's own
+        # templating pass untouched.
         if [ -f "${_ENV_VARS_FILE}" ]; then
-          ENV_VARS=$(grep -v '^#' "${_ENV_VARS_FILE}" | grep -v '^\s*$' | paste -sd, -)
+          ENV_YAML=".cloudbuild-env-vars.yaml"
+          : > "$$ENV_YAML"
+          while IFS= read -r line || [ -n "$$line" ]; do
+            case "$$line" in
+              ''|'#'*) continue ;;
+            esac
+            key=$${line%%=*}
+            value=$${line#*=}
+            value=$${value//\'/\'\'}
+            printf "%s: '%s'\n" "$$key" "$$value" >> "$$ENV_YAML"
+          done < "${_ENV_VARS_FILE}"
+          DEPLOY_ENV_FLAG="--env-vars-file=$$ENV_YAML"
         else
           echo "Warning: ${_ENV_VARS_FILE} not found, deploying with no env vars set."
-          ENV_VARS=""
+          DEPLOY_ENV_FLAG=""
         fi
 
         gcloud run deploy ${_SERVICE_NAME} \
@@ -58,7 +75,7 @@ steps:
           --region ${_REGION} \
           --platform managed \
           --add-cloudsql-instances ${_CLOUD_SQL_INSTANCE} \
-          --set-env-vars "$ENV_VARS" \
+          $$DEPLOY_ENV_FLAG \
           --allow-unauthenticated \
           --memory 2Gi \
           --cpu 2 \
