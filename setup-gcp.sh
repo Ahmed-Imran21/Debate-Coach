@@ -18,6 +18,11 @@ REGION="us-central1"
 
 BUCKET_NAME="debate-coach-508804-recordings"
 
+# Frontend origin allowed to upload recordings straight to the
+# bucket. Must match the deployed Vercel domain exactly (scheme
+# included, no trailing slash), or browser uploads fail CORS.
+FRONTEND_ORIGIN="https://web-debate-coach1.vercel.app"
+
 SQL_INSTANCE="debate-coach-db"
 SQL_TIER="db-custom-1-3840"
 DB_NAME="debate_coach"
@@ -51,6 +56,32 @@ else
     --location="${REGION}" \
     --uniform-bucket-level-access
 fi
+
+echo "--- Configuring bucket CORS ---"
+# Required, not optional: the browser PUTs recordings straight to
+# storage.googleapis.com using a presigned URL (see
+# generate_presigned_upload_url in app/services/storage.py), so
+# without a CORS policy naming the frontend origin the browser
+# blocks every upload at preflight. A new bucket has no CORS
+# config at all.
+#
+# Add your production frontend origin here when it changes.
+CORS_FILE="$(mktemp)"
+cat > "${CORS_FILE}" <<EOF
+[
+  {
+    "origin": [
+      "${FRONTEND_ORIGIN}",
+      "http://localhost:3000"
+    ],
+    "method": ["GET", "PUT", "HEAD"],
+    "responseHeader": ["Content-Type", "Content-Length", "ETag"],
+    "maxAgeSeconds": 3600
+  }
+]
+EOF
+gcloud storage buckets update "gs://${BUCKET_NAME}" --cors-file="${CORS_FILE}"
+rm -f "${CORS_FILE}"
 
 echo "--- Creating Artifact Registry repository ---"
 if gcloud artifacts repositories describe "${ARTIFACT_REPO}" --location="${REGION}" >/dev/null 2>&1; then
