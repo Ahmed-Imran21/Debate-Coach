@@ -58,6 +58,12 @@ export default function SessionPage(): ReactElement {
   const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // A poll can still be in flight when the user navigates away, and
+  // fetch here is not abortable. Without this, a 401 landing after
+  // the move redirects them off whatever page they just opened,
+  // which reads as "clicking About signed me out".
+  const leftPageRef = useRef(false);
+
   const load = useCallback(async (): Promise<boolean> => {
     try {
       const current = await getSession(id);
@@ -70,6 +76,8 @@ export default function SessionPage(): ReactElement {
 
       return current.status !== "failed";
     } catch (caught) {
+      if (leftPageRef.current) return false;
+
       if (caught instanceof ApiError) {
         if (caught.status === 401) {
           clearTokens();
@@ -89,6 +97,8 @@ export default function SessionPage(): ReactElement {
   }, [id, router]);
 
   useEffect(() => {
+    leftPageRef.current = false;
+
     if (!getAccessToken()) {
       router.replace("/login");
       return;
@@ -106,6 +116,7 @@ export default function SessionPage(): ReactElement {
 
     return () => {
       cancelled = true;
+      leftPageRef.current = true;
       if (timerRef.current !== null) clearTimeout(timerRef.current);
     };
   }, [load, router]);
