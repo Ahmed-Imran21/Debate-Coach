@@ -99,21 +99,46 @@ fi
 CLOUD_SQL_CONNECTION_NAME="${PROJECT_ID}:${REGION}:${SQL_INSTANCE}"
 
 echo "--- Granting IAM roles to the default Compute service account ---"
-# Cloud Run uses this account at runtime unless you attach a
-# different one with --service-account. It needs:
+# This same account plays two roles on this project, since no
+# separate build/runtime accounts were set up: it's what
+# `gcloud builds submit` runs as (new projects default Cloud
+# Build to the Compute default SA, not the legacy
+# @cloudbuild.gserviceaccount.com one), and what Cloud Run uses
+# at runtime unless you attach a different one with
+# --service-account. So it needs both sets of roles:
+#
+# Runtime (Cloud Run):
 #   - roles/cloudsql.client       to reach the Cloud SQL instance
 #   - roles/storage.objectAdmin   to read/write the recordings bucket
 #   - roles/iam.serviceAccountTokenCreator on itself, so the
 #     backend can self-sign Cloud Storage URLs (see
 #     app/services/storage.py) without a downloaded key file.
+#
+# Build (Cloud Build, via cloudbuild.yaml):
+#   - roles/storage.objectViewer      to read its own uploaded source tarball
+#   - roles/logging.logWriter         to write build logs
+#   - roles/artifactregistry.writer   to push the built image
+#   - roles/run.admin                 to deploy the Cloud Run revision
+#   - roles/iam.serviceAccountUser    to deploy Cloud Run running as itself
 PROJECT_NUMBER=$(gcloud projects describe "${PROJECT_ID}" --format="value(projectNumber)")
 RUN_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 
-gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-  --member="serviceAccount:${RUN_SA}" \
-  --role="roles/cloudsql.client" \
-  --condition=None
+for ROLE in \
+  roles/cloudsql.client \
+  roles/storage.objectViewer \
+  roles/logging.logWriter \
+  roles/artifactregistry.writer \
+  roles/run.admin \
+  roles/iam.serviceAccountUser \
+; do
+  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${RUN_SA}" \
+    --role="${ROLE}" \
+    --condition=None \
+    --format="none"
+done
 
+# Scoped to just the recordings bucket, not granted project-wide.
 gcloud storage buckets add-iam-policy-binding "gs://${BUCKET_NAME}" \
   --member="serviceAccount:${RUN_SA}" \
   --role="roles/storage.objectAdmin"
@@ -121,7 +146,8 @@ gcloud storage buckets add-iam-policy-binding "gs://${BUCKET_NAME}" \
 gcloud iam service-accounts add-iam-policy-binding "${RUN_SA}" \
   --member="serviceAccount:${RUN_SA}" \
   --role="roles/iam.serviceAccountTokenCreator" \
-  --condition=None
+  --condition=None \
+  --format="none"
 
 echo
 echo "=== Done ==="
