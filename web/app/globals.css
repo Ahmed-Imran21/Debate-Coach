@@ -303,6 +303,23 @@ code {
   color: var(--ink);
 }
 
+.btn-sm {
+  padding: 0.4375rem 0.75rem;
+  font-size: 0.8125rem;
+}
+
+/* Destructive quiet button. Matches the data-tone convention
+   the .state pills already use. */
+.btn-quiet[data-tone="danger"] {
+  color: var(--brick);
+  border-color: var(--brick);
+}
+
+.btn-quiet[data-tone="danger"]:hover:not(:disabled) {
+  background: var(--brick);
+  color: #f6f8f5;
+}
+
 .btn-stop {
   background: var(--brick);
 }
@@ -669,6 +686,10 @@ code {
 
 .row {
   border-bottom: 1px solid var(--rule);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
 }
 
 .row > a,
@@ -680,6 +701,10 @@ code {
   padding: 1rem 0;
   text-decoration: none;
   color: inherit;
+  /* min-width:0 so a long title truncates instead of shoving the
+     row action off the edge. */
+  flex: 1;
+  min-width: 0;
 }
 
 .row > a:hover {
