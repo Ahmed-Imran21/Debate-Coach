@@ -39,15 +39,27 @@ RUN useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /srv
 USER appuser
 
-EXPOSE 8000
+# Cloud Run injects PORT at container start (default 8080) and
+# requires the app to listen on it. No gcloud auth step is
+# needed here: Cloud Run attaches a runtime service account and
+# credentials are fetched from its metadata server automatically
+# (Application Default Credentials), the same mechanism
+# google-cloud-storage and the Cloud SQL connector already use in
+# app/services/storage.py and app/db/database.py. Grant that
+# service account's IAM roles with setup-gcp.sh, not by baking a
+# key file into the image.
+ENV PORT=8080
+EXPOSE $PORT
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
+    CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8080') + '/health')"
 
 # One worker on purpose. The API key pool, its rate limiters,
 # and the pipeline thread pool are all per-process state. A
 # second uvicorn worker would mean two independent views of the
 # same provider quota, and the published limits would stop
 # being enforced correctly. Scale with pipeline_workers, or
-# move the key accounting into a shared store first.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# move the key accounting into a shared store first. Shell form
+# so $PORT is expanded at container start; exec-form CMD would
+# pass the literal string "$PORT" to uvicorn instead.
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --workers 1

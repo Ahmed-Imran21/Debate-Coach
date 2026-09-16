@@ -33,7 +33,19 @@ class Settings(BaseSettings):
     # Database
     # ---------------------------------------------------------
 
-    database_url: str
+    # Plain SQLAlchemy URL, used when cloud_sql_connection_name
+    # is not set (local dev, or any Postgres reachable directly
+    # by network). Empty when connecting through the Cloud SQL
+    # connector instead.
+    database_url: str = ""
+
+    # Set to route the DB connection through the Cloud SQL
+    # Python Connector instead of database_url. Format:
+    # "PROJECT:REGION:INSTANCE".
+    cloud_sql_connection_name: str = ""
+    db_user: str = ""
+    db_password: str = ""
+    db_name: str = ""
 
     # ---------------------------------------------------------
     # Auth
@@ -45,14 +57,18 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 30
 
     # ---------------------------------------------------------
-    # Object storage (S3-compatible: AWS S3, Cloudflare R2, ...)
+    # Object storage (Google Cloud Storage)
     # ---------------------------------------------------------
 
-    storage_endpoint_url: str
-    storage_access_key_id: str
-    storage_secret_access_key: str
-    storage_bucket_name: str
-    storage_region: str = "auto"
+    gcp_project_id: str
+    gcp_storage_bucket: str
+
+    # Service account to impersonate for signing URLs when the
+    # ambient credentials have no private key (e.g. Cloud Run's
+    # attached runtime service account). Not needed for local
+    # dev against a downloaded service-account key file, since
+    # that credential can already sign directly.
+    gcp_service_account_email: str = ""
 
     # How long a browser upload or report download link stays
     # valid, in seconds.
