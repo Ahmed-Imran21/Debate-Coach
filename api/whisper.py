@@ -926,15 +926,99 @@ class WhisperClient:
     # ========================================================
 
     @staticmethod
+    def _field(
+        source: Any,
+        name: str,
+        default: Any = None,
+    ) -> Any:
+        """
+        Groq returns verbose_json pieces as plain dicts, while
+        other SDK builds return objects. getattr() on a dict
+        silently yields the default, which previously wiped every
+        segment timing and left the whole transcript unusable, so
+        read both shapes explicitly.
+        """
+
+        if isinstance(source, dict):
+            return source.get(name, default)
+
+        return getattr(source, name, default)
+
+    @classmethod
+    def _normalize_words(
+        cls,
+        raw_words: Any,
+    ) -> list[dict[str, Any]]:
+
+        normalized = []
+
+        for word in raw_words or []:
+
+            normalized.append(
+                {
+                    "word": cls._field(word, "word", "") or "",
+                    "start": cls._field(word, "start"),
+                    "end": cls._field(word, "end"),
+                    "probability": cls._field(
+                        word,
+                        "probability",
+                    ),
+                }
+            )
+
+        return normalized
+
+    @staticmethod
+    def _attach_loose_words(
+        segments: list[dict[str, Any]],
+        loose_words: list[dict[str, Any]],
+    ) -> None:
+        """
+        With timestamp_granularities=["segment", "word"], Groq
+        returns word timings in one top-level list rather than
+        nested per segment. raw_metrics reads them off each
+        segment (segment.get("words", [])), so map them back by
+        time span or every per-word metric silently sees nothing.
+        """
+
+        if not loose_words or not segments:
+            return
+
+        if any(segment["words"] for segment in segments):
+            return
+
+        for word in loose_words:
+
+            target = None
+
+            for segment in segments:
+
+                start = segment["start"]
+                end = segment["end"]
+
+                if (
+                    word["start"] is not None
+                    and start is not None
+                    and end is not None
+                    and start <= word["start"] <= end
+                ):
+                    target = segment
+                    break
+
+            # Anything unplaceable (no timing, or past the last
+            # segment boundary) still belongs in the transcript.
+            if target is None:
+                target = segments[-1]
+
+            target["words"].append(word)
+
+    @classmethod
     def _normalize_segments(
+        cls,
         response: Any,
     ) -> list[dict[str, Any]]:
 
-        raw_segments = getattr(
-            response,
-            "segments",
-            None,
-        )
+        raw_segments = cls._field(response, "segments")
 
         if raw_segments is None:
             return []
@@ -943,72 +1027,25 @@ class WhisperClient:
 
         for segment in raw_segments:
 
-            start = getattr(
-                segment,
-                "start",
-                None,
-            )
-
-            end = getattr(
-                segment,
-                "end",
-                None,
-            )
-
-            text = getattr(
-                segment,
-                "text",
-                "",
-            ) or ""
-
-            words = []
-
-            raw_words = getattr(
-                segment,
-                "words",
-                None,
-            )
-
-            if raw_words is not None:
-
-                for word in raw_words:
-
-                    words.append(
-                        {
-                            "word": (
-                                getattr(
-                                    word,
-                                    "word",
-                                    "",
-                                )
-                                or ""
-                            ),
-                            "start": getattr(
-                                word,
-                                "start",
-                                None,
-                            ),
-                            "end": getattr(
-                                word,
-                                "end",
-                                None,
-                            ),
-                            "probability": getattr(
-                                word,
-                                "probability",
-                                None,
-                            ),
-                        }
-                    )
-
             normalized.append(
                 {
-                    "start": start,
-                    "end": end,
-                    "text": text.strip(),
-                    "words": words,
+                    "start": cls._field(segment, "start"),
+                    "end": cls._field(segment, "end"),
+                    "text": (
+                        cls._field(segment, "text", "") or ""
+                    ).strip(),
+                    "words": cls._normalize_words(
+                        cls._field(segment, "words")
+                    ),
                 }
             )
+
+        cls._attach_loose_words(
+            normalized,
+            cls._normalize_words(
+                cls._field(response, "words")
+            ),
+        )
 
         return normalized
 
