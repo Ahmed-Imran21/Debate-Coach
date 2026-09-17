@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from app.services import storage
 from visual_analysis import config
+from visual_analysis.pipeline import VideoAnalysisResult
 from visual_analysis.schema import VisualSignalTrack
 from visual_analysis.signals import SignalValidationError, validate_track
 
@@ -161,3 +162,13 @@ def load_track(key: str, expected_session_id: str) -> VisualSignalTrack:
     raw = storage.download_bytes(key)
     data = decode_body(raw, "gzip", "application/gzip")
     return parse_track(data, expected_session_id)
+
+
+def store_result(user_id: uuid.UUID, session_id: uuid.UUID, result: VideoAnalysisResult) -> str:
+    key = result_key(user_id, session_id)
+    storage.upload_json(key, result.to_dict())
+    return key
+
+
+def load_result(key: str) -> dict:
+    return storage.download_json(key)
