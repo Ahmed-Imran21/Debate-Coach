@@ -172,3 +172,13 @@ def store_result(user_id: uuid.UUID, session_id: uuid.UUID, result: VideoAnalysi
 
 def load_result(key: str) -> dict:
     return storage.download_json(key)
+
+
+def store_feedback(user_id: uuid.UUID, session_id: uuid.UUID, document: dict) -> str:
+    key = feedback_key(user_id, session_id)
+    storage.upload_json(key, document)
+    return key
+
+
+def load_feedback(key: str) -> dict:
+    return storage.download_json(key)

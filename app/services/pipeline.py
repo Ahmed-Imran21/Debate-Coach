@@ -36,7 +36,7 @@ import traceback
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -55,6 +55,7 @@ from coaching_engine.utils.result_writer import save_coaching_results
 from visual_analysis.pipeline import VideoAnalysisResult, run_pipeline
 from visual_analysis.schema import VisualSignalTrack
 from visual_analysis.signals import check_duration
+from visual_coaching.service import generate_visual_coaching
 
 from app.core.config import settings
 from app.db.database import SessionLocal
@@ -279,7 +280,7 @@ def _run(
     # 4b. Visual delivery analysis (optional, best-effort)
     # ---------------------------------------------------------
 
-    _run_video_analysis(
+    video_result = _run_video_analysis(
         db=db,
         debate_session=debate_session,
         session_directory=session_directory,
@@ -317,6 +318,20 @@ def _run(
             **(debate_session.extra or {}),
             "llm_errors": coaching_engine.llm_errors,
         }
+
+    # ---------------------------------------------------------
+    # 5b. Visual coaching (optional, best-effort, separate LLM call)
+    # ---------------------------------------------------------
+
+    _run_visual_coaching(
+        db=db,
+        debate_session=debate_session,
+        session_directory=session_directory,
+        user_id=user_id,
+        video_result=video_result,
+        api_client=api_client,
+        on_queued=on_queued,
+    )
 
     # ---------------------------------------------------------
     # 6. Publish artifacts
@@ -360,7 +375,7 @@ def _run_video_analysis(
     debate_session: DebateSession,
     session_directory: Path,
     user_id: UUID,
-) -> None:
+) -> Optional[dict]:
     """
     Only acts on a video_analyses row already in "received" state,
     meaning a signal track was uploaded before /start (see
@@ -374,14 +389,18 @@ def _run_video_analysis(
     analysis is an optional extra on top of the audio/transcript
     pipeline, so any exception is caught, logged, and turned into
     video_row.status = "failed" without raising further.
+
+    Returns the result dict on success (so _run_visual_coaching,
+    later in the same pipeline run, can reuse it without a redundant
+    GCS round-trip), else None.
     """
 
     if not settings.video_analysis_enabled:
-        return
+        return None
 
     video_row = db.get(VideoAnalysis, debate_session.id)
     if video_row is None or video_row.status != "received" or not video_row.signal_track_key:
-        return
+        return None
 
     video_row.status = "processing"
     video_row.processing_started_at = datetime.now(timezone.utc)
@@ -400,7 +419,7 @@ def _run_video_analysis(
             video_row.status = "unavailable"
             video_row.unavailable_reason = mismatch_reason
             db.commit()
-            return
+            return None
 
         result: VideoAnalysisResult = run_pipeline(track, analysis["speech_segments"])
         result_key = visual_signals.store_result(user_id, debate_session.id, result)
@@ -416,6 +435,8 @@ def _run_video_analysis(
         video_row.result_key = result_key
         db.commit()
 
+        return result.to_dict()
+
     except Exception:
         logger.exception(
             "Video analysis failed for session %s",
@@ -427,6 +448,8 @@ def _run_video_analysis(
         if video_row is not None:
             video_row.status = "failed"
             db.commit()
+
+        return None
 
 
 def _record_session_metrics(
@@ -469,6 +492,75 @@ def _record_session_metrics(
         row.recorded_at = datetime.now(timezone.utc)
 
     db.commit()
+
+
+def _run_visual_coaching(
+    db: DbSession,
+    debate_session: DebateSession,
+    session_directory: Path,
+    user_id: UUID,
+    video_result: Optional[dict],
+    api_client,
+    on_queued: Optional[Callable[[float], None]],
+) -> None:
+    """
+    §7.1: after the existing coaching stage, if the video row's
+    status is "processed" or "partial", run the separate visual
+    coaching LLM call and store its output. Every other outcome from
+    _run_video_analysis (not requested, unavailable, insufficient_data,
+    failed, or the flag being off, which leaves video_result None) is
+    left untouched -- there is nothing to coach on.
+
+    A failure here is never a session failure and never touches the
+    already-stored metrics/moments: it only ever changes
+    coaching_status, matching §7.1's "Failure -> failed; metrics and
+    moments are still stored and shown."
+    """
+
+    if not settings.video_analysis_enabled or video_result is None:
+        return
+
+    video_row = db.get(VideoAnalysis, debate_session.id)
+    if video_row is None or video_row.status not in ("processed", "partial"):
+        return
+
+    video_row.coaching_status = "pending"
+    db.commit()
+
+    try:
+        transcription = json.loads((session_directory / "transcription.json").read_text(encoding="utf-8"))
+        analysis = json.loads((session_directory / "analysis.json").read_text(encoding="utf-8"))
+        raw_metrics = json.loads((session_directory / "raw_metrics.json").read_text(encoding="utf-8"))
+        speech_content = json.loads((session_directory / "speech_content.json").read_text(encoding="utf-8"))
+
+        outcome = generate_visual_coaching(
+            session_id=str(debate_session.id),
+            transcription=transcription,
+            audio_analysis=analysis,
+            raw_metrics=raw_metrics,
+            speech_content=speech_content,
+            video_analysis=video_result,
+            api_client=api_client,
+            on_queued=on_queued,
+        )
+
+        stored_key = visual_signals.store_feedback(user_id, debate_session.id, outcome.document)
+
+        video_row.coaching_status = outcome.status
+        video_row.feedback_key = stored_key
+        db.commit()
+
+    except Exception:
+        logger.exception(
+            "Visual coaching failed for session %s",
+            debate_session.id,
+        )
+        db.rollback()
+
+        video_row = db.get(VideoAnalysis, debate_session.id)
+        if video_row is not None:
+            video_row.coaching_status = "failed"
+            db.commit()
 
 
 # ============================================================
