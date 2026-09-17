@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "1.0.1",
     "next": "15.5.25",
     "react": "19.0.0",
     "react-dom": "19.0.0"
