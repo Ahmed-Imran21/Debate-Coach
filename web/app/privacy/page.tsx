@@ -47,6 +47,32 @@ export default function PrivacyPage(): ReactElement {
               that you can play it back alongside its analysis.
             </p>
 
+            {/* LEGAL REVIEW REQUIRED: describes the optional camera
+                analysis feature (task doc §10). Confirm this framing
+                (no video ever transmitted, only derived numbers) and
+                the MediaPipe telemetry disclosure meet applicable
+                requirements before this feature is enabled for any
+                user. */}
+            <h3>Camera-based delivery analysis (optional)</h3>
+            <p>
+              If you turn on visual feedback for a session, your browser
+              analyses your camera feed on your own device using Google&rsquo;s
+              MediaPipe library. Your video is never recorded, uploaded, or
+              seen by us: only the numbers it derives are sent to our
+              servers &mdash; which way your head is turned, whether you
+              appear to be facing the camera, and where your hands are and
+              how much they move over time. This feature is off by default
+              and only ever runs for a session where you explicitly turn it
+              on. MediaPipe itself sends its own usage and performance
+              statistics to Google; see{" "}
+              <a href="https://goo.gle/mediapipe-privacy" target="_blank" rel="noreferrer">
+                MediaPipe&rsquo;s privacy notice
+              </a>
+              . The derived numbers, and any coaching feedback generated
+              from them, are stored and deleted on the same terms as the
+              rest of a session&rsquo;s analysis, described below.
+            </p>
+
             <h3>Analysis output</h3>
             <p>
               The transcript of your recording, the delivery metrics
@@ -94,6 +120,15 @@ export default function PrivacyPage(): ReactElement {
               sent to Google&rsquo;s Gemini API for the same analysis
               steps. Google therefore may process the text of your
               recordings, though not the audio.
+            </p>
+
+            <h3>Google (MediaPipe)</h3>
+            <p>
+              If you turn on the optional camera-based delivery analysis
+              described above, the on-device MediaPipe library sends its
+              own usage and performance statistics to Google. This is
+              separate from Gemini and happens only for sessions where
+              you enable that feature.
             </p>
 
             <h3>Object storage and hosting</h3>

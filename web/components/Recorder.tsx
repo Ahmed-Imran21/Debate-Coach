@@ -4,10 +4,25 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 
-import { ApiError, uploadAndStart } from "@/lib/api";
+import {
+  ApiError,
+  createSession,
+  startSession,
+  uploadAndStart,
+  type VideoFinalize,
+} from "@/lib/api";
 import { formatClock } from "@/components/SpeechTrack";
+import ConsentPanel from "@/components/video-analysis/ConsentPanel";
+import SetupScreen from "@/components/video-analysis/SetupScreen";
+import { getVideoAnalysisConsent, type ConsentChoice } from "@/features/video-analysis/consent";
+import { cleanupOldTracks, deleteTrack, saveTrackSafely } from "@/features/video-analysis/storage";
+import type { Context, VisualSignalTrack } from "@/features/video-analysis/types";
+import { uploadTrackWithRetry } from "@/features/video-analysis/upload";
+import { useVisualCapture } from "@/features/video-analysis/useVisualCapture";
 
-type Phase = "idle" | "recording" | "review" | "uploading";
+type Phase = "idle" | "consent" | "setup" | "recording" | "review" | "uploading";
+
+const VIDEO_ANALYSIS_ENABLED = process.env.NEXT_PUBLIC_VIDEO_ANALYSIS_ENABLED === "true";
 
 /**
  * Picks a container the browser can actually produce. Chrome
@@ -40,6 +55,7 @@ export default function Recorder(): ReactElement {
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [supported, setSupported] = useState(true);
+  const [consent, setConsent] = useState<ConsentChoice | null>(null);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -48,6 +64,26 @@ export default function Recorder(): ReactElement {
   const frameRef = useRef<number | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Video-analysis state that spans setup -> recording -> stop,
+  // used only when VIDEO_ANALYSIS_ENABLED and the user opted in.
+  const usingVideoRef = useRef(false);
+  const videoContextRef = useRef<Context>({ setting: "camera_audience", uses_notes: false });
+  const videoT0MsRef = useRef<number | null>(null);
+  const videoOutcomeRef = useRef<VideoFinalize | null>(null);
+  const videoTrackReadyRef = useRef<VisualSignalTrack | null>(null);
+  // The audio-only MediaStream acquireAndStartSetup() hands back,
+  // held here from "setup" until SetupScreen finishes (handleSetupReady)
+  // or bails (handleSetupSkip) and actually starts the recorder.
+  const pendingAudioStreamRef = useRef<MediaStream | null>(null);
+  // onstop fires capture.endRecording() without awaiting it (it's
+  // a DOM event handler, not async); submit() awaits this instead
+  // of reading videoTrackReadyRef/videoOutcomeRef synchronously, so
+  // a fast click on "Analyse this speech" can't race finalization
+  // and silently discard a track that just hadn't landed yet.
+  const videoFinalizePromiseRef = useRef<Promise<void> | null>(null);
+
+  const capture = useVisualCapture({ enabled: VIDEO_ANALYSIS_ENABLED && consent === "in" });
+
   useEffect(() => {
     setSupported(
       typeof navigator !== "undefined" &&
@@ -55,6 +91,9 @@ export default function Recorder(): ReactElement {
         typeof MediaRecorder !== "undefined" &&
         pickMimeType() !== undefined,
     );
+    if (VIDEO_ANALYSIS_ENABLED) {
+      setConsent(getVideoAnalysisConsent());
+    }
   }, []);
 
   const teardown = useCallback(() => {
@@ -95,6 +134,88 @@ export default function Recorder(): ReactElement {
     return () => URL.revokeObjectURL(url);
   }, [blob]);
 
+  /** Wires up the MediaRecorder against an already-acquired audio-only stream and starts it. Identical regardless of whether video analysis is in play. */
+  const armRecorder = useCallback(
+    (audioStream: MediaStream, mimeType: string) => {
+      streamRef.current = audioStream;
+      chunksRef.current = [];
+
+      const recorder = new MediaRecorder(audioStream, { mimeType });
+      recorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
+      };
+
+      recorder.onstart = () => {
+        if (usingVideoRef.current) {
+          const t0 = performance.now();
+          videoT0MsRef.current = t0;
+          capture.beginRecording(t0);
+        }
+      };
+
+      recorder.onstop = () => {
+        setBlob(new Blob(chunksRef.current, { type: mimeType }));
+        setPhase("review");
+        teardown();
+
+        if (usingVideoRef.current && videoT0MsRef.current !== null) {
+          const durationS = (performance.now() - videoT0MsRef.current) / 1000;
+          videoFinalizePromiseRef.current = capture
+            .endRecording(durationS, videoContextRef.current)
+            .then((result) => {
+              if (result.available) {
+                videoTrackReadyRef.current = result.track;
+              } else {
+                videoTrackReadyRef.current = null;
+                videoOutcomeRef.current = { status: "unavailable", reason: result.reason };
+              }
+            });
+        }
+      };
+
+      // Level meter. This is the one moving thing on the page and
+      // it exists to confirm the microphone is actually picking
+      // you up, not for decoration.
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 512;
+      audioContext.createMediaStreamSource(audioStream).connect(analyser);
+
+      const samples = new Uint8Array(analyser.frequencyBinCount);
+
+      const measure = () => {
+        analyser.getByteTimeDomainData(samples);
+
+        let sum = 0;
+        for (const sample of samples) {
+          const centred = (sample - 128) / 128;
+          sum += centred * centred;
+        }
+
+        const rms = Math.sqrt(sum / samples.length);
+        setLevel(Math.min(100, Math.round(rms * 260)));
+
+        frameRef.current = requestAnimationFrame(measure);
+      };
+
+      frameRef.current = requestAnimationFrame(measure);
+
+      const startedAt = Date.now();
+      setElapsed(0);
+      tickRef.current = setInterval(() => {
+        setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+      }, 250);
+
+      recorder.start();
+      setPhase("recording");
+    },
+    [capture, teardown],
+  );
+
   async function startRecording(): Promise<void> {
     setError(null);
 
@@ -107,6 +228,39 @@ export default function Recorder(): ReactElement {
       return;
     }
 
+    usingVideoRef.current = false;
+    videoTrackReadyRef.current = null;
+    videoOutcomeRef.current = null;
+    videoT0MsRef.current = null;
+
+    if (VIDEO_ANALYSIS_ENABLED && consent === null) {
+      setPhase("consent");
+      return;
+    }
+
+    if (VIDEO_ANALYSIS_ENABLED && consent === "in") {
+      usingVideoRef.current = true;
+      setPhase("setup");
+      const result = await capture.acquireAndStartSetup();
+      if (!result.ok || !result.audioStream) {
+        // Camera denied / unsupported: fall back to audio only,
+        // exactly like today, but remember why for finalize().
+        usingVideoRef.current = false;
+        videoOutcomeRef.current = { status: "unavailable", reason: result.reason ?? "camera_denied" };
+        await beginAudioOnly(mimeType);
+        return;
+      }
+      // Stay on "setup" phase; SetupScreen drives the rest and
+      // triggers armRecorder() via handleSetupReady/handleSetupSkip,
+      // which read the stream back out of this ref.
+      pendingAudioStreamRef.current = result.audioStream;
+      return;
+    }
+
+    await beginAudioOnly(mimeType);
+  }
+
+  async function beginAudioOnly(mimeType: string): Promise<void> {
     let stream: MediaStream;
 
     try {
@@ -115,62 +269,58 @@ export default function Recorder(): ReactElement {
       setError(
         "Microphone access was blocked. Allow it for this site in your browser settings, then try again.",
       );
+      setPhase("idle");
       return;
     }
 
-    streamRef.current = stream;
-    chunksRef.current = [];
+    armRecorder(stream, mimeType);
+  }
 
-    const recorder = new MediaRecorder(stream, { mimeType });
-    recorderRef.current = recorder;
+  function handleConsentDecided(choice: ConsentChoice): void {
+    setConsent(choice);
+    setPhase("idle");
+    // Let the user press "Start recording" again now that their
+    // choice is remembered, rather than acquiring the camera as a
+    // side effect of answering the consent question.
+  }
 
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunksRef.current.push(event.data);
+  async function handleSetupReady(context: Context): Promise<void> {
+    videoContextRef.current = context;
+    const mimeType = pickMimeType();
+    if (!mimeType) return; // startRecording() already checked this; unreachable in practice
+
+    // The audio stream was acquired back in acquireAndStartSetup();
+    // fetch a fresh MediaStream over the same underlying track by
+    // re-deriving it isn't possible here, so acquireAndStartSetup
+    // returns it directly and we stash it for this moment instead.
+    const audioStream = pendingAudioStreamRef.current;
+    pendingAudioStreamRef.current = null;
+    if (!audioStream) {
+      setError("Could not start the recorder. Try again.");
+      setPhase("idle");
+      return;
+    }
+
+    armRecorder(audioStream, mimeType);
+  }
+
+  function handleSetupSkip(): void {
+    usingVideoRef.current = false;
+    videoOutcomeRef.current = {
+      status: "unavailable",
+      reason: capture.unavailableReason ?? "user_opted_out",
     };
+    capture.abandon(capture.unavailableReason ?? "user_opted_out");
 
-    recorder.onstop = () => {
-      setBlob(new Blob(chunksRef.current, { type: mimeType }));
-      setPhase("review");
-      teardown();
-    };
+    const audioStream = pendingAudioStreamRef.current;
+    pendingAudioStreamRef.current = null;
+    const mimeType = pickMimeType();
 
-    // Level meter. This is the one moving thing on the page and
-    // it exists to confirm the microphone is actually picking
-    // you up, not for decoration.
-    const audioContext = new AudioContext();
-    audioContextRef.current = audioContext;
-
-    const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 512;
-    audioContext.createMediaStreamSource(stream).connect(analyser);
-
-    const samples = new Uint8Array(analyser.frequencyBinCount);
-
-    const measure = () => {
-      analyser.getByteTimeDomainData(samples);
-
-      let sum = 0;
-      for (const sample of samples) {
-        const centred = (sample - 128) / 128;
-        sum += centred * centred;
-      }
-
-      const rms = Math.sqrt(sum / samples.length);
-      setLevel(Math.min(100, Math.round(rms * 260)));
-
-      frameRef.current = requestAnimationFrame(measure);
-    };
-
-    frameRef.current = requestAnimationFrame(measure);
-
-    const startedAt = Date.now();
-    setElapsed(0);
-    tickRef.current = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
-    }, 250);
-
-    recorder.start();
-    setPhase("recording");
+    if (audioStream && mimeType) {
+      armRecorder(audioStream, mimeType);
+    } else {
+      setPhase("idle");
+    }
   }
 
   function stopRecording(): void {
@@ -192,8 +342,66 @@ export default function Recorder(): ReactElement {
     setPhase("uploading");
 
     try {
-      const id = await uploadAndStart(blob, title.trim() || null);
-      router.push(`/practice/${id}`);
+      if (!usingVideoRef.current && videoOutcomeRef.current === null) {
+        // No video analysis was ever in play: the exact path this
+        // app has always used.
+        const id = await uploadAndStart(blob, title.trim() || null);
+        router.push(`/practice/${id}`);
+        return;
+      }
+
+      // Video was requested (whether or not it ended up available):
+      // the session needs to be created with video_analysis so the
+      // backend knows to expect (or account for the absence of) a
+      // signal track.
+      const contentType = blob.type.split(";")[0] || "audio/webm";
+      const created = await createSession({
+        content_type: contentType,
+        title: title.trim() || null,
+        video_analysis: "requested",
+      });
+
+      const audioUpload = await fetch(created.upload_url, {
+        method: "PUT",
+        headers: created.upload_headers,
+        body: blob,
+      });
+      if (!audioUpload.ok) {
+        throw new ApiError(
+          audioUpload.status,
+          "The recording could not be uploaded. Check your connection and try again.",
+        );
+      }
+
+      // Make sure onstop's finalization (building the track,
+      // closing the extractor) has actually finished before
+      // reading its result below.
+      if (videoFinalizePromiseRef.current) {
+        await videoFinalizePromiseRef.current;
+      }
+
+      let finalize: VideoFinalize;
+
+      if (videoTrackReadyRef.current) {
+        try {
+          await saveTrackSafely(created.id, videoTrackReadyRef.current);
+          const track = { ...videoTrackReadyRef.current, session_id: created.id };
+          await uploadTrackWithRetry(created.id, track);
+          finalize = { status: "uploaded" };
+          await deleteTrack(created.id).catch(() => {});
+        } catch {
+          // uploadTrackWithRetry has already exhausted its own
+          // retry/backoff by the time it throws.
+          finalize = { status: "unavailable", reason: "upload_failed" };
+        }
+      } else if (videoOutcomeRef.current) {
+        finalize = videoOutcomeRef.current;
+      } else {
+        finalize = { status: "unavailable", reason: "face_not_found" };
+      }
+
+      await startSession(created.id, finalize);
+      router.push(`/practice/${created.id}`);
     } catch (caught) {
       setError(
         caught instanceof ApiError
@@ -203,6 +411,18 @@ export default function Recorder(): ReactElement {
       setPhase("review");
     }
   }
+
+  // §4.11.6: on app load, clean up IndexedDB entries older than
+  // INDEXEDDB_MAX_AGE_DAYS. A track only lives there between
+  // "recording stopped" and "upload acknowledged" (submit() itself
+  // deletes it on success), so anything this old belongs to a visit
+  // that was abandoned before submitting, not an in-flight upload
+  // worth resuming — there is no session id to resume it against
+  // once the page has reloaded.
+  useEffect(() => {
+    if (!VIDEO_ANALYSIS_ENABLED) return;
+    void cleanupOldTracks();
+  }, []);
 
   if (!supported) {
     return (
@@ -235,11 +455,32 @@ export default function Recorder(): ReactElement {
           <p className="note" style={{ marginBottom: "1.5rem" }}>
             Speak as you would in a round. Your browser will ask for
             microphone access the first time.
+            {VIDEO_ANALYSIS_ENABLED && consent === "in" && " Visual feedback is on."}
+            {VIDEO_ANALYSIS_ENABLED && consent === "out" && " Visual feedback is off."}
           </p>
-          <button className="btn" type="button" onClick={startRecording}>
-            Start recording
-          </button>
+          <div className="btn-row">
+            <button className="btn" type="button" onClick={startRecording}>
+              Start recording
+            </button>
+            {VIDEO_ANALYSIS_ENABLED && consent !== null && (
+              <button
+                className="btn btn-quiet"
+                type="button"
+                onClick={() => setPhase("consent")}
+              >
+                Change visual feedback setting
+              </button>
+            )}
+          </div>
         </>
+      )}
+
+      {phase === "consent" && (
+        <ConsentPanel onDecide={handleConsentDecided} />
+      )}
+
+      {phase === "setup" && (
+        <SetupScreen capture={capture} onReady={handleSetupReady} onSkip={handleSetupSkip} />
       )}
 
       {phase === "recording" && (
@@ -255,6 +496,42 @@ export default function Recorder(): ReactElement {
           <p className="sr-only" role="status">
             Recording in progress.
           </p>
+
+          {usingVideoRef.current && capture.faceMissingSeconds > 0 && (
+            <p className="note" role="status" style={{ marginBottom: "1rem" }}>
+              Your face isn&apos;t in view.
+            </p>
+          )}
+
+          {usingVideoRef.current && (
+            <div className="btn-row" style={{ marginBottom: "1rem" }}>
+              <button
+                className="filter"
+                type="button"
+                aria-pressed={capture.showPreview}
+                onClick={() => capture.setShowPreview(!capture.showPreview)}
+              >
+                {capture.showPreview ? "Hide camera preview" : "Show camera preview"}
+              </button>
+            </div>
+          )}
+
+          <video
+            ref={capture.videoRef}
+            muted
+            playsInline
+            autoPlay
+            hidden={!usingVideoRef.current || !capture.showPreview}
+            style={{
+              width: "8rem",
+              aspectRatio: "16 / 9",
+              objectFit: "cover",
+              transform: "scaleX(-1)",
+              borderRadius: "var(--radius)",
+              background: "var(--well)",
+              marginBottom: "1rem",
+            }}
+          />
 
           <button className="btn btn-stop" type="button" onClick={stopRecording}>
             Stop recording
