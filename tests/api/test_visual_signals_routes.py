@@ -289,3 +289,103 @@ def test_delete_removes_video_rows_and_storage_prefix(client_for, make_user, fak
     assert db.query(SessionMetric).filter_by(session_id=uuid.UUID(sid)).count() == 0
     assert fake_storage.deleted_prefixes == [f"users/{user.id}/sessions/{sid}/"]
     assert not any(k.startswith(f"users/{user.id}/sessions/{sid}/") for k in fake_storage.blobs)
+
+
+class _FakeCoachingResponse:
+    def __init__(self, content: str):
+        self.success = True
+        self.content = content
+        self.error = None
+
+
+class _FakeCoachingClient:
+    """A visual_feedback item with no moment_id -- correlation isn't
+    the point of this test, only that a real feedback document gets
+    written to a real key so deletion has three real artifacts (not
+    one) to actually remove."""
+
+    def generate(self, **kwargs):
+        import json as _json
+
+        return _FakeCoachingResponse(_json.dumps({
+            "visual_feedback": [{
+                "id": "vf_1", "category": "coverage", "polarity": "neutral",
+                "moment_id": None, "metric_keys": [], "observation_ids": [],
+                "coaching": "Visual delivery measurements were captured for this session.",
+            }],
+            "summary": "A short session with steady delivery.",
+        }))
+
+
+def test_delete_removes_all_three_artifacts_after_a_real_pipeline_run(client_for, make_user, fake_storage, db, tmp_path):
+    """
+    Runs both real pipeline hooks (not a hand-inserted row) so the
+    signal track, video_analysis.json, and visual_feedback.json all
+    genuinely exist under the session's storage prefix, plus a full
+    set of 11 SessionMetric rows -- then deletes the session and
+    checks fake_storage.blobs and the DB directly, rather than
+    trusting that a prefix-based delete "should" catch files this
+    test never actually created.
+    """
+
+    from app.models.session import DebateSession, SessionStatus
+    from app.models.video_analysis import SessionMetric, VideoAnalysis
+    from app.services import pipeline as pipeline_module
+
+    user = make_user("cascade@test")
+    c = client_for(user)
+    sid = _create(c)["id"]
+    assert _put_signals(c, sid, data=simple_track(sid, duration_s=6.0)).status_code == 200
+
+    prefix = f"users/{user.id}/sessions/{sid}/"
+    session_dir = tmp_path / sid
+    session_dir.mkdir()
+    (session_dir / "analysis.json").write_text(json.dumps({
+        "total_duration": 6.0,
+        "speech_segments": [{"start": 0.0, "end": 6.0, "duration": 6.0}],
+    }), encoding="utf-8")
+    (session_dir / "transcription.json").write_text(json.dumps({
+        "segments": [{"start": 0.0, "end": 6.0, "text": "A short point.", "words": [
+            {"word": w, "start": i * 0.4, "end": i * 0.4 + 0.3} for i, w in enumerate(["A", "short", "point."])
+        ]}],
+    }), encoding="utf-8")
+    (session_dir / "raw_metrics.json").write_text(json.dumps({"fillers": {"instances": []}}), encoding="utf-8")
+    (session_dir / "speech_content.json").write_text(json.dumps({
+        "segments": [{"id": "au_01", "type": "conclusion", "start": 0.0, "end": 6.0, "segment_ids": ["s_000"], "summary": "Wraps up."}],
+    }), encoding="utf-8")
+
+    debate_session = db.query(DebateSession).filter_by(id=uuid.UUID(sid)).one()
+    debate_session.status = SessionStatus.analyzing_speech
+    db.commit()
+
+    video_result = pipeline_module._run_video_analysis(
+        db=db, debate_session=debate_session, session_directory=session_dir, user_id=user.id,
+    )
+    assert video_result is not None, "the pipeline hook must have actually run and produced a result"
+
+    pipeline_module._run_visual_coaching(
+        db=db, debate_session=debate_session, session_directory=session_dir, user_id=user.id,
+        video_result=video_result, api_client=_FakeCoachingClient(), on_queued=None,
+    )
+
+    # Confirm all three artifacts and both row sets genuinely exist
+    # before deleting -- otherwise the post-delete assertions below
+    # would trivially pass with nothing to actually remove.
+    video_row = db.get(VideoAnalysis, uuid.UUID(sid))
+    assert video_row is not None
+    assert video_row.result_key is not None
+    assert video_row.feedback_key is not None
+    assert f"{prefix}visual_signals.json.gz" in fake_storage.blobs
+    assert video_row.result_key in fake_storage.blobs
+    assert video_row.feedback_key in fake_storage.blobs
+    assert db.query(SessionMetric).filter_by(session_id=uuid.UUID(sid)).count() == 11
+    blobs_before = {k for k in fake_storage.blobs if k.startswith(prefix)}
+    assert len(blobs_before) == 3
+
+    r = c.delete(f"/v1/sessions/{sid}")
+    assert r.status_code == 204
+    db.expire_all()
+
+    assert not any(k.startswith(prefix) for k in fake_storage.blobs)
+    assert db.get(VideoAnalysis, uuid.UUID(sid)) is None
+    assert db.query(SessionMetric).filter_by(session_id=uuid.UUID(sid)).count() == 0
