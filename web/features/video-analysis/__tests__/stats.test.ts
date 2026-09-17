@@ -1,6 +1,27 @@
 import { describe, expect, it } from "vitest";
 
-import { clamp, meanAbsoluteDeviation, median } from "../stats";
+import { clamp, meanAbsoluteDeviation, median, percentile90 } from "../stats";
+
+describe("percentile90", () => {
+  it("returns the 90th percentile by nearest rank", () => {
+    // 10 values 1..10: ceil(0.9*10)-1 = 8 -> index 8 -> value 9
+    expect(percentile90([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])).toBe(9);
+  });
+
+  it("does not mutate the input", () => {
+    const input = [5, 1, 3];
+    percentile90(input);
+    expect(input).toEqual([5, 1, 3]);
+  });
+
+  it("handles an unsorted single-value list", () => {
+    expect(percentile90([42])).toBe(42);
+  });
+
+  it("returns NaN for an empty list", () => {
+    expect(percentile90([])).toBeNaN();
+  });
+});
 
 describe("median", () => {
   it("returns the middle value for an odd-length list", () => {

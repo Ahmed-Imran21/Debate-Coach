@@ -1,4 +1,12 @@
-/** Small pure numeric helpers for calibration (§4.9). */
+/** Small pure numeric helpers for calibration (§4.9) and the benchmark/scheduler (§4.7, §4.9.2). */
+
+/** Nearest-rank 90th percentile. Does not mutate the input. */
+export function percentile90(values: readonly number[]): number {
+  if (values.length === 0) return NaN;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.ceil(0.9 * sorted.length) - 1);
+  return sorted[Math.max(0, index)];
+}
 
 export function median(values: readonly number[]): number {
   if (values.length === 0) return NaN;

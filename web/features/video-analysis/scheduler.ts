@@ -18,6 +18,7 @@ import {
   P90_WINDOW,
   REDUCE_HANDS_P90_MS,
 } from "./config";
+import { percentile90 } from "./stats";
 
 export type HandsMode = "full" | "reduced" | "off";
 
@@ -27,12 +28,6 @@ export interface Degradation {
   face_fps: number;
   hands_fps: number;
   reason: "p90_latency" | "thermal_suspected" | "manual";
-}
-
-function percentile90(sorted_ascending_input: readonly number[]): number {
-  const values = [...sorted_ascending_input].sort((a, b) => a - b);
-  const index = Math.min(values.length - 1, Math.ceil(0.9 * values.length) - 1);
-  return values[Math.max(0, index)];
 }
 
 export class AdaptiveScheduler {
@@ -70,6 +65,11 @@ export class AdaptiveScheduler {
 
   get isDisabled(): boolean {
     return this.disabled;
+  }
+
+  /** Ticks in roughly the last second (face always runs, so this approximates face fps). Display-only. */
+  get currentEffectiveFps(): number {
+    return this.recentTickMs.length;
   }
 
   /**
