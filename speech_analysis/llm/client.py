@@ -87,6 +87,9 @@ class LLMClient:
             max_tokens=self.ESTIMATED_OUTPUT_TOKENS,
             temperature=0.0,
             on_queued=on_queued,
+            # Native JSON mode. The prompt says "JSON", which
+            # Groq requires for this to be accepted.
+            response_format="json",
         )
 
         if not response.success:

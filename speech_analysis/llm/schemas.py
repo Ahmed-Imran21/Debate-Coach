@@ -22,65 +22,62 @@ VALID_LABELS = {
 
 
 # ---------------------------------------------------------
-# Semantic segment
+# Semantic unit as the model returns it
 # ---------------------------------------------------------
 
 class SemanticSegment(BaseModel):
     """
-    Represents one portion of speech classified by the LLM.
+    One unit of speech as classified by the LLM.
+
+    The model identifies a unit only by the transcript segment
+    ids it covers. It does not write timestamps or copy text:
+    start, end and text are computed in code from the ids
+    (see response_parser.anchor_units). start/end/text are
+    accepted here for tolerance but ignored downstream.
     """
 
-    start: float = Field(
-        description="Start timestamp of the segment in seconds."
-    )
-
-    end: float = Field(
-        description="End timestamp of the segment in seconds."
-    )
-
-    text: str = Field(
-        description="Exact transcript text belonging to this segment."
+    segment_ids: List[str] = Field(
+        description=(
+            "Ids of the transcript segments this unit covers, "
+            "e.g. [\"s_004\", \"s_005\"]."
+        )
     )
 
     labels: List[str] = Field(
-        description="Semantic labels assigned to this segment."
+        description="Semantic labels assigned to this unit."
     )
 
     fallacy_type: Optional[str] = Field(
         default=None,
         description=(
-            "Type of logical fallacy if the segment contains "
-            "a logical fallacy."
-        )
+            "Type of logical fallacy if the unit contains one."
+        ),
     )
 
-    @field_validator("start", "end")
+    summary: Optional[str] = Field(
+        default=None,
+        description="One short sentence describing the unit.",
+    )
+
+    # Tolerated, never trusted.
+    id: Optional[str] = None
+    start: Optional[float] = None
+    end: Optional[float] = None
+    text: Optional[str] = None
+
+    @field_validator("segment_ids")
     @classmethod
-    def validate_timestamp(cls, value):
-        if value < 0:
-            raise ValueError("Timestamp cannot be negative.")
-
-        return value
-
-    @field_validator("end")
-    @classmethod
-    def validate_end(cls, value, info):
-        start = info.data.get("start")
-
-        if start is not None and value < start:
+    def validate_segment_ids(cls, value):
+        cleaned = []
+        for item in value or []:
+            if isinstance(item, str) and item.strip():
+                cleaned.append(item.strip())
+        if not cleaned:
             raise ValueError(
-                "End timestamp cannot be earlier than start timestamp."
+                "Every semantic unit must reference at least one "
+                "transcript segment id."
             )
-
-        return value
-
-    @field_validator("text")
-    @classmethod
-    def validate_text(cls, value):
-        if not value.strip():
-            raise ValueError("Segment text cannot be empty.")
-
-        return value
+        return cleaned
 
     @field_validator("labels")
     @classmethod
@@ -132,5 +129,5 @@ class SpeechAnalysisResponse(BaseModel):
 
     segments: List[SemanticSegment] = Field(
         default_factory=list,
-        description="Semantically classified speech segments."
+        description="Semantically classified speech units."
     )

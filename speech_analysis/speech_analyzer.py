@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from api.client import APIClient
+from audio.transcript_shape import CanonicalTranscript, to_canonical
 
 from .llm.client import LLMClient
 from .llm.response_parser import parse_and_validate
@@ -37,23 +38,28 @@ def load_transcription(transcription_path):
 # ---------------------------------------------------------
 
 def prepare_transcript(transcription):
-    transcript_parts = []
+    """
+    Render the transcript for the model as one line per
+    segment, each prefixed with its canonical id:
 
-    for segment in transcription["segments"]:
+        [s_004] The problem with their argument is ...
 
-        start = segment.get("start")
-        end = segment.get("end")
-        text = segment.get("text", "").strip()
+    The model hands those ids back; it never writes
+    timestamps. Accepts either the raw transcription dict or
+    an already-built CanonicalTranscript.
+    """
 
-        if start is None or end is None:
-            continue
+    canonical = (
+        transcription
+        if isinstance(transcription, CanonicalTranscript)
+        else to_canonical(transcription)
+    )
 
-        if not text:
-            continue
-
-        transcript_parts.append(
-            f"[{start:.2f} - {end:.2f}] {text}"
-        )
+    transcript_parts = [
+        f"[{segment.id}] {segment.text}"
+        for segment in canonical.segments
+        if segment.text
+    ]
 
     if not transcript_parts:
         raise ValueError(
@@ -119,8 +125,10 @@ def analyze_speech(
 
     print("Preparing transcript...")
 
+    canonical = to_canonical(transcription)
+
     transcript = prepare_transcript(
-        transcription
+        canonical
     )
 
     print("Initializing LLM client...")
@@ -141,7 +149,8 @@ def analyze_speech(
 
     speech_content = parse_and_validate(
         response,
-        session_id
+        session_id,
+        canonical,
     )
 
     print("Saving semantic analysis...")

@@ -22,6 +22,33 @@ VALID_LABELS = {
 
 
 # ---------------------------------------------------------
+# Key-unit types
+# ---------------------------------------------------------
+
+# How the eleven semantic labels collapse into the unit types
+# the timeline and video correlation reason about. A unit with
+# several labels takes the first matching type in this order.
+# "not key" units are still stored; they just never anchor a
+# correlated moment.
+UNIT_TYPE_RULES = (
+    ("conclusion", {"conclusion"}),
+    ("rebuttal", {"rebuttal", "counterargument"}),
+    ("claim", {"claim", "argument"}),
+    ("evidence", {"evidence", "example", "reasoning"}),
+)
+
+KEY_UNIT_TYPES = frozenset({"claim", "rebuttal", "conclusion"})
+
+
+def unit_type_for(labels) -> str:
+    present = set(labels or ())
+    for unit_type, matching in UNIT_TYPE_RULES:
+        if present & matching:
+            return unit_type
+    return "other"
+
+
+# ---------------------------------------------------------
 # Speech segment
 # ---------------------------------------------------------
 
@@ -39,6 +66,18 @@ class SpeechSegment:
     labels: List[str] = field(default_factory=list)
 
     fallacy_type: Optional[str] = None
+
+    # Time anchoring. `segment_ids` are canonical transcript
+    # segment ids (audio/transcript_shape) this unit covers;
+    # start/end/text above are computed from them in code, never
+    # taken from the model. `id` is "au_000", "au_001", ...
+    # `type` is the key-unit type derived from labels
+    # (see unit_type_for). Empty/None on content produced before
+    # this field existed.
+    id: Optional[str] = None
+    segment_ids: List[str] = field(default_factory=list)
+    type: Optional[str] = None
+    summary: Optional[str] = None
 
     def __post_init__(self):
         """
@@ -94,6 +133,18 @@ class SpeechSegment:
 
         if self.fallacy_type is not None:
             data["fallacy_type"] = self.fallacy_type
+
+        if self.id is not None:
+            data["id"] = self.id
+
+        if self.segment_ids:
+            data["segment_ids"] = list(self.segment_ids)
+
+        if self.type is not None:
+            data["type"] = self.type
+
+        if self.summary:
+            data["summary"] = self.summary
 
         return data
 

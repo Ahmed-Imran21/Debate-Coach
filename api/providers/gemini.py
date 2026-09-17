@@ -25,6 +25,7 @@ class GeminiProvider:
         system_instruction: Optional[str] = None,
         max_output_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
+        json_mode: bool = False,
     ) -> Dict[str, Any]:
 
         client = genai.Client(
@@ -49,6 +50,11 @@ class GeminiProvider:
 
         if temperature is not None:
             config["temperature"] = temperature
+
+        # Gemini's structured output: constrains the response to
+        # valid JSON without a schema.
+        if json_mode:
+            config["response_mime_type"] = "application/json"
 
         # -------------------------------------------------
         # Generate response

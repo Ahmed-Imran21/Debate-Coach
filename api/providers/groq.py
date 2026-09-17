@@ -24,6 +24,7 @@ class GroqProvider:
         messages: List[Dict[str, str]],
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
+        json_mode: bool = False,
     ) -> Dict[str, Any]:
 
         client = Groq(api_key=api_key.key)
@@ -38,6 +39,14 @@ class GroqProvider:
 
         if temperature is not None:
             request_kwargs["temperature"] = temperature
+
+        # Groq's JSON mode. The API rejects the request unless the
+        # word "JSON" appears somewhere in the messages, so callers
+        # that opt in must say so in their prompt.
+        if json_mode:
+            request_kwargs["response_format"] = {
+                "type": "json_object"
+            }
 
         response = client.chat.completions.create(
             **request_kwargs

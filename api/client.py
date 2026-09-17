@@ -166,11 +166,23 @@ class APIClient:
         on_queued: Optional[
             Callable[[float], None]
         ] = None,
+        response_format: Optional[str] = None,
     ) -> APIResponse:
+        """
+        response_format: None (default, provider decides) or "json",
+        which switches on the provider's native JSON output mode.
+        Purely a pass-through to the provider call; it does not
+        touch key selection, reservation, or limits.
+        """
 
         if estimated_tokens < 0:
             raise ValueError(
                 "estimated_tokens cannot be negative."
+            )
+
+        if response_format not in (None, "json"):
+            raise ValueError(
+                "response_format must be None or 'json'."
             )
 
         request_id = str(uuid4())
@@ -192,6 +204,7 @@ class APIClient:
             ),
             "max_tokens": max_tokens,
             "temperature": temperature,
+            "json_mode": response_format == "json",
         }
 
         # -----------------------------------------------------
@@ -346,6 +359,10 @@ class APIClient:
             "temperature"
         )
 
+        json_mode = bool(
+            call_kwargs.get("json_mode", False)
+        )
+
         try:
 
             if api_key.provider == "groq":
@@ -363,6 +380,7 @@ class APIClient:
                         messages=messages,
                         max_tokens=max_tokens,
                         temperature=temperature,
+                        json_mode=json_mode,
                     )
                 )
 
@@ -388,6 +406,7 @@ class APIClient:
                         temperature=(
                             temperature
                         ),
+                        json_mode=json_mode,
                     )
                 )
 
