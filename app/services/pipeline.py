@@ -346,24 +346,13 @@ def _run(
 # VISUAL ANALYSIS (optional, best-effort)
 # ============================================================
 
-# Which quality-summary coverage figure best explains a given
-# metric's confidence, for the queryable SessionMetric row. Kept
-# here rather than in visual_analysis/metrics.py because it's a
-# storage-shaping concern, not part of the metric computation
-# itself.
-_COVERAGE_KEY_FOR: dict[str, str] = {
-    "analysis_coverage": "analysis_coverage",
-    "face_visibility": "analysis_coverage",
-    "hand_visibility": "analysis_coverage",
-    "camera_facing_ratio": "face_coverage",
-    "gaze_away_time_ratio": "face_coverage",
-    "head_down_time_ratio": "face_coverage",
-    "gesture_rate": "hand_coverage",
-    "gesture_amplitude_avg": "hand_coverage",
-    "hands_still_time_ratio": "hand_coverage",
-    "second_person_time_ratio": "analysis_coverage",
-    "face_lost_count": "analysis_coverage",
-}
+# The result's own status vocabulary ("complete | partial |
+# insufficient_data") is deliberately not the same as the
+# video_analyses.status column's ("processed | partial |
+# insufficient_data | ..."); see visual_analysis/pipeline.py's
+# module docstring. Every value not listed here passes through
+# unchanged.
+_RESULT_STATUS_TO_DB_STATUS: dict[str, str] = {"complete": "processed"}
 
 
 def _run_video_analysis(
@@ -418,7 +407,7 @@ def _run_video_analysis(
 
         _record_session_metrics(db, debate_session, user_id, track, result)
 
-        video_row.status = result.status
+        video_row.status = _RESULT_STATUS_TO_DB_STATUS.get(result.status, result.status)
         video_row.schema_version = result.schema_version
         video_row.metrics_version = result.metrics_version
         video_row.platform = track.source.platform
@@ -454,14 +443,11 @@ def _record_session_metrics(
     above), but this stays correct if it ever does.
     """
 
-    for m in result.metrics:
-        coverage_key = _COVERAGE_KEY_FOR.get(m["key"])
-        coverage = result.quality.get(coverage_key) if coverage_key else None
-
+    for key, m in result.metrics.items():
         row = db.scalar(
             select(SessionMetric).where(
                 SessionMetric.session_id == debate_session.id,
-                SessionMetric.metric_key == m["key"],
+                SessionMetric.metric_key == key,
                 SessionMetric.definition_version == m["definition_version"],
             )
         )
@@ -469,16 +455,16 @@ def _record_session_metrics(
             row = SessionMetric(
                 session_id=debate_session.id,
                 user_id=user_id,
-                metric_key=m["key"],
+                metric_key=key,
                 definition_version=m["definition_version"],
             )
             db.add(row)
 
         row.value = m["value"]
         row.unit = m["unit"]
-        row.coverage = coverage
+        row.coverage = m["coverage"]
         row.confidence = m["confidence"]
-        row.status = "available" if m["available"] else (m["unavailable_reason"] or "unavailable")
+        row.status = m["status"]
         row.platform = track.source.platform
         row.recorded_at = datetime.now(timezone.utc)
 

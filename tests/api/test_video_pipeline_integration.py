@@ -88,19 +88,19 @@ def test_happy_path_processes_and_stores_everything(app_module, db, fake_storage
     assert video_row.schema_version is not None
     assert video_row.metrics_version is not None
     assert video_row.platform == "web"
-    assert video_row.quality["face_coverage"] == pytest.approx(1.0, abs=1e-6)
+    assert video_row.quality["face_tracked_ratio"] == pytest.approx(1.0, abs=1e-6)
 
     stored = json.loads(fake_storage.blobs[video_row.result_key])
-    assert stored["status"] == "processed"
+    assert stored["status"] == "complete"  # the result's own vocabulary, distinct from the DB row's "processed"
     assert len(stored["metrics"]) == 11
 
     metric_rows = db.query(SessionMetric).filter_by(session_id=session.id).all()
     assert len(metric_rows) == 11
-    assert {r.metric_key for r in metric_rows} == {m["key"] for m in stored["metrics"]}
+    assert {r.metric_key for r in metric_rows} == set(stored["metrics"].keys())
     assert all(r.platform == "web" for r in metric_rows)
-    face_visibility_row = next(r for r in metric_rows if r.metric_key == "face_visibility")
-    assert face_visibility_row.status == "available"
-    assert face_visibility_row.value == pytest.approx(1.0, abs=1e-6)
+    face_tracked_row = next(r for r in metric_rows if r.metric_key == "face_tracked_ratio")
+    assert face_tracked_row.status == "ok"
+    assert face_tracked_row.value == pytest.approx(1.0, abs=1e-6)
 
 
 def test_skips_when_flag_disabled(app_module, db, fake_storage, video_flag, make_user, tmp_path):
