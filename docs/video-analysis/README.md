@@ -133,6 +133,26 @@ with a comment on the module marking all of it provisional. None of it comes fro
 data yet. See `THRESHOLD_TUNING.md` for the annotation format and the evaluation script
 that turns hand-labelled sessions into precision/recall numbers per event type.
 
+## Known tech debt: no real migration mechanism
+
+The schema is created by `Base.metadata.create_all()`, called once at app startup
+(`app/main.py:32`, inside the `lifespan` hook Uvicorn runs on boot — verified against
+the actual deployed container's entrypoint, `Dockerfile`'s `CMD uvicorn app.main:app...`,
+by importing `app.main` directly and confirming `video_analyses`/`session_metrics` are
+already registered on `Base.metadata` before that line would run). `create_all()` only
+adds tables that don't exist yet; it never alters an existing table. Alembic is in
+`requirements.txt` but there's no `alembic.ini`, no versions directory, and no migration
+ever runs as a deploy step.
+
+This is why every piece of new state for this feature lives in the two new tables
+(`video_analyses`, `session_metrics`) rather than as new columns on `sessions` — that was
+an explicit Phase 0 decision (`PHASE0_REPORT.md` §1.5 and the approved decision 5 in
+§11), not an oversight, and it's sufficient for this feature specifically. The general
+gap remains: wiring up Alembic properly (a baseline migration from the current models,
+then `alembic upgrade head` as a deploy step before the app starts) is still open, is a
+deployment-process change outside this feature's scope, and needs its own review before
+any future change actually needs to alter an existing table.
+
 ## Running the tests
 
 ```bash
