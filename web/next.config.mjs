@@ -20,7 +20,12 @@ const nextConfig = {
       // Hardening this further means issuing a per-request nonce
       // from middleware, which opts every route into dynamic
       // rendering.
-      "script-src 'self' 'unsafe-inline'",
+      // 'wasm-unsafe-eval' is separate from 'unsafe-inline' above:
+      // it is what lets WebAssembly.instantiate compile the
+      // MediaPipe runtime at all under a strict script-src. Only
+      // loaded post opt-in (see features/video-analysis), and
+      // only from same-origin /mediapipe/wasm — never a CDN.
+      "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data:",
       "font-src 'self'",
@@ -41,7 +46,10 @@ const nextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
           {
             key: "Permissions-Policy",
-            value: "camera=(), geolocation=(), microphone=(self)",
+            // camera=(self): visual analysis is opt-in and only
+            // ever requested from this origin (see §0.3.4 rule 4 —
+            // no video leaves the browser regardless).
+            value: "camera=(self), geolocation=(), microphone=(self)",
           },
           {
             key: "Strict-Transport-Security",
