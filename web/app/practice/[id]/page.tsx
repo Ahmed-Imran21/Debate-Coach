@@ -5,12 +5,14 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 
+import KeyMomentsList from "@/components/KeyMomentsList";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import SpeechTrack, {
   formatClock,
   type Mark,
 } from "@/components/SpeechTrack";
+import VisualDeliverySection from "@/components/VisualDeliverySection";
 import {
   ApiError,
   clearTokens,
@@ -221,6 +223,14 @@ function Working({
 
 function Report({ report }: { report: SessionReport }): ReactElement {
   const [filter, setFilter] = useState<Category | "all">("all");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const seekAudio = useCallback((seconds: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = seconds;
+    void audio.play();
+  }, []);
 
   const speech = report.raw_metrics.speech;
   const pauses = report.raw_metrics.pauses;
@@ -343,12 +353,19 @@ function Report({ report }: { report: SessionReport }): ReactElement {
             Listen back
           </h2>
           <audio
+            ref={audioRef}
             controls
             src={report.audio_url}
             style={{ width: "100%", maxWidth: "34rem" }}
           />
         </div>
       )}
+
+      <VisualDeliverySection report={report} />
+      <KeyMomentsList
+        report={report}
+        onSeek={report.audio_url ? seekAudio : undefined}
+      />
 
       <h2 style={{ fontSize: "var(--step-2)", marginBottom: "1rem" }}>
         Scores by category
