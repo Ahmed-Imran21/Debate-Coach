@@ -18,8 +18,13 @@ You are NOT giving coaching advice.
 You are ONLY identifying what each portion of speech is doing
 and assigning the appropriate semantic labels.
 
-The transcript contains timestamps. Preserve those timestamps
-when creating semantic segments.
+Each line of the transcript begins with a segment id in square
+brackets, for example [s_004]. Identify every unit you find by
+listing the ids of the transcript segments it covers. Do not
+write timestamps and do not copy transcript text; the ids are
+the only reference that is used.
+
+Respond with JSON only.
 """
 
 
@@ -144,13 +149,10 @@ for it.
 Do not force multiple labels onto a segment when only one
 label is appropriate.
 
-Use the timestamps from the transcript to determine the
-start and end of each segment.
-
-Do not modify the transcript text.
-
-The "text" field should contain the exact transcript text
-corresponding to that semantic segment.
+A unit may span several consecutive transcript segments;
+list all of their ids in order. Each transcript segment
+belongs to at most one unit. Do not split a transcript
+segment between two units.
 """
 
 
@@ -221,11 +223,10 @@ The JSON must follow this structure:
     "session_id": "string",
     "segments": [
         {{
-            "start": 0.0,
-            "end": 5.0,
-            "text": "exact transcript text",
-            "labels": ["claim"],
-            "fallacy_type": null
+            "segment_ids": ["s_004", "s_005"],
+            "labels": ["rebuttal"],
+            "fallacy_type": null,
+            "summary": "one short sentence describing this unit"
         }}
     ]
 }}
@@ -233,14 +234,16 @@ The JSON must follow this structure:
 Requirements:
 
 - "session_id" must exactly match the provided session ID.
-- "start" and "end" must be timestamps in seconds.
-- "end" must be greater than or equal to "start".
-- "text" must exactly match the corresponding transcript.
+- "segment_ids" must list the ids shown in square brackets in
+  the transcript, in the order they appear. Use only ids that
+  appear in the transcript.
 - "labels" must contain only valid semantic labels.
 - "fallacy_type" must be null unless "logical_fallacy" is
   included in the labels.
 - If "logical_fallacy" is present, provide an appropriate
   fallacy_type.
+- Do not include "start", "end" or "text" fields.
+- List units in transcript order.
 - Do not include markdown.
 - Do not include explanations outside the JSON.
 """
