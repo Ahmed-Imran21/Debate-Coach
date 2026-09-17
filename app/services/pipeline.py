@@ -28,15 +28,18 @@ of those modules expects:
 It is deleted when the run finishes, successfully or not.
 """
 
+import json
 import logging
 import shutil
 import tempfile
 import traceback
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from audio.audio_analyzer import analyze_audio
@@ -49,9 +52,15 @@ from speech_analysis.speech_analyzer import analyze_speech
 from coaching_engine.engine import CoachingEngine
 from coaching_engine.utils.result_writer import save_coaching_results
 
+from visual_analysis.pipeline import VideoAnalysisResult, run_pipeline
+from visual_analysis.schema import VisualSignalTrack
+from visual_analysis.signals import check_duration
+
+from app.core.config import settings
 from app.db.database import SessionLocal
 from app.models.session import DebateSession, SessionStatus
-from app.services import engine, storage
+from app.models.video_analysis import SessionMetric, VideoAnalysis
+from app.services import engine, storage, visual_signals
 from app.services.audio_convert import (
     AudioConversionError,
     normalize_audio_to_wav,
@@ -267,6 +276,17 @@ def _run(
     )
 
     # ---------------------------------------------------------
+    # 4b. Visual delivery analysis (optional, best-effort)
+    # ---------------------------------------------------------
+
+    _run_video_analysis(
+        db=db,
+        debate_session=debate_session,
+        session_directory=session_directory,
+        user_id=user_id,
+    )
+
+    # ---------------------------------------------------------
     # 5. Coaching analysis
     # ---------------------------------------------------------
 
@@ -318,6 +338,149 @@ def _run(
     debate_session.status = SessionStatus.completed
     debate_session.queue_wait_seconds = None
     debate_session.error_message = None
+
+    db.commit()
+
+
+# ============================================================
+# VISUAL ANALYSIS (optional, best-effort)
+# ============================================================
+
+# Which quality-summary coverage figure best explains a given
+# metric's confidence, for the queryable SessionMetric row. Kept
+# here rather than in visual_analysis/metrics.py because it's a
+# storage-shaping concern, not part of the metric computation
+# itself.
+_COVERAGE_KEY_FOR: dict[str, str] = {
+    "analysis_coverage": "analysis_coverage",
+    "face_visibility": "analysis_coverage",
+    "hand_visibility": "analysis_coverage",
+    "camera_facing_ratio": "face_coverage",
+    "gaze_away_time_ratio": "face_coverage",
+    "head_down_time_ratio": "face_coverage",
+    "gesture_rate": "hand_coverage",
+    "gesture_amplitude_avg": "hand_coverage",
+    "hands_still_time_ratio": "hand_coverage",
+    "second_person_time_ratio": "analysis_coverage",
+    "face_lost_count": "analysis_coverage",
+}
+
+
+def _run_video_analysis(
+    db: DbSession,
+    debate_session: DebateSession,
+    session_directory: Path,
+    user_id: UUID,
+) -> None:
+    """
+    Only acts on a video_analyses row already in "received" state,
+    meaning a signal track was uploaded before /start (see
+    app/routes/sessions.py's start_analysis: "Leave 'received' as
+    is; the pipeline moves it on."). Every other state -- no row
+    (not requested), "unavailable" (the client already reported its
+    own reason), or a terminal state from an earlier run -- is left
+    untouched.
+
+    A failure here is never a session failure: visual delivery
+    analysis is an optional extra on top of the audio/transcript
+    pipeline, so any exception is caught, logged, and turned into
+    video_row.status = "failed" without raising further.
+    """
+
+    if not settings.video_analysis_enabled:
+        return
+
+    video_row = db.get(VideoAnalysis, debate_session.id)
+    if video_row is None or video_row.status != "received" or not video_row.signal_track_key:
+        return
+
+    video_row.status = "processing"
+    video_row.processing_started_at = datetime.now(timezone.utc)
+    db.commit()
+
+    try:
+        analysis = json.loads((session_directory / "analysis.json").read_text(encoding="utf-8"))
+
+        track: VisualSignalTrack = visual_signals.load_track(
+            video_row.signal_track_key,
+            expected_session_id=str(debate_session.id),
+        )
+
+        mismatch_reason = check_duration(track, analysis.get("total_duration"))
+        if mismatch_reason:
+            video_row.status = "unavailable"
+            video_row.unavailable_reason = mismatch_reason
+            db.commit()
+            return
+
+        result: VideoAnalysisResult = run_pipeline(track, analysis["speech_segments"])
+        result_key = visual_signals.store_result(user_id, debate_session.id, result)
+
+        _record_session_metrics(db, debate_session, user_id, track, result)
+
+        video_row.status = result.status
+        video_row.schema_version = result.schema_version
+        video_row.metrics_version = result.metrics_version
+        video_row.platform = track.source.platform
+        video_row.runtime_version = track.source.runtime.version
+        video_row.quality = result.quality
+        video_row.result_key = result_key
+        db.commit()
+
+    except Exception:
+        logger.exception(
+            "Video analysis failed for session %s",
+            debate_session.id,
+        )
+        db.rollback()
+
+        video_row = db.get(VideoAnalysis, debate_session.id)
+        if video_row is not None:
+            video_row.status = "failed"
+            db.commit()
+
+
+def _record_session_metrics(
+    db: DbSession,
+    debate_session: DebateSession,
+    user_id: UUID,
+    track: VisualSignalTrack,
+    result: VideoAnalysisResult,
+) -> None:
+    """
+    One SessionMetric row per metric, upserted on (session_id,
+    metric_key, definition_version) -- the pipeline does not
+    normally re-process a track (see the "received"-only guard
+    above), but this stays correct if it ever does.
+    """
+
+    for m in result.metrics:
+        coverage_key = _COVERAGE_KEY_FOR.get(m["key"])
+        coverage = result.quality.get(coverage_key) if coverage_key else None
+
+        row = db.scalar(
+            select(SessionMetric).where(
+                SessionMetric.session_id == debate_session.id,
+                SessionMetric.metric_key == m["key"],
+                SessionMetric.definition_version == m["definition_version"],
+            )
+        )
+        if row is None:
+            row = SessionMetric(
+                session_id=debate_session.id,
+                user_id=user_id,
+                metric_key=m["key"],
+                definition_version=m["definition_version"],
+            )
+            db.add(row)
+
+        row.value = m["value"]
+        row.unit = m["unit"]
+        row.coverage = coverage
+        row.confidence = m["confidence"]
+        row.status = "available" if m["available"] else (m["unavailable_reason"] or "unavailable")
+        row.platform = track.source.platform
+        row.recorded_at = datetime.now(timezone.utc)
 
     db.commit()
 
