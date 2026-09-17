@@ -88,6 +88,16 @@ class Settings(BaseSettings):
     max_upload_mb: int = 100
 
     # ---------------------------------------------------------
+    # Video analysis (optional, parallel to the audio pipeline)
+    # ---------------------------------------------------------
+
+    # Off by default. With this false the API ignores every
+    # video field, the signal upload route is 404, and results
+    # carry no video sections: behaviour is identical to before
+    # the feature existed.
+    video_analysis_enabled: bool = False
+
+    # ---------------------------------------------------------
     # HTTP
     # ---------------------------------------------------------
 
