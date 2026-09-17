@@ -34,6 +34,20 @@ export interface User {
   created_at: string;
 }
 
+/** video_analysis_status values (app/models/video_analysis.py); "not_requested" when the session never asked for it. */
+export type VideoAnalysisStatus =
+  | "not_requested"
+  | "awaiting_upload"
+  | "received"
+  | "processing"
+  | "processed"
+  | "partial"
+  | "insufficient_data"
+  | "unavailable"
+  | "failed";
+
+export type VisualCoachingStatus = "not_requested" | "pending" | "completed" | "failed";
+
 export interface SessionSummary {
   id: string;
   title: string | null;
@@ -47,6 +61,9 @@ export interface SessionSummary {
   error_message: string | null;
   created_at: string;
   updated_at: string;
+  video_analysis_status: VideoAnalysisStatus;
+  video_unavailable_reason: string | null;
+  visual_coaching_status: VisualCoachingStatus;
 }
 
 export interface SessionCreated {
@@ -130,6 +147,13 @@ export interface SessionReport {
   speech_content: SpeechContent;
   analysis: AudioAnalysis;
   audio_url: string | null;
+  video_analysis_status: VideoAnalysisStatus;
+  video_unavailable_reason: string | null;
+  visual_coaching_status: VisualCoachingStatus;
+  /** video_analysis.json (VideoAnalysisResult), shaped in Phase 3-5. Untyped here; the Phase 7 report UI narrows it. */
+  video_analysis: Record<string, unknown> | null;
+  correlated_moments: Array<Record<string, unknown>> | null;
+  visual_feedback: Record<string, unknown> | null;
 }
 
 export const STATUS_LABEL: Record<SessionStatus, string> = {
