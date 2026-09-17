@@ -17,7 +17,10 @@ import pytest
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 os.environ.setdefault("GCP_PROJECT_ID", "test-project")
 os.environ.setdefault("GCP_STORAGE_BUCKET", "test-bucket")
-os.environ.setdefault("DATABASE_URL", "sqlite://")
+# app.db.database builds its engine at import with Postgres pool
+# arguments SQLite rejects. This URL is never connected to; API
+# tests bind the ORM to their own SQLite engine instead.
+os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://test:test@127.0.0.1:1/never")
 os.environ.setdefault("VIDEO_ANALYSIS_ENABLED", "true")
 
 

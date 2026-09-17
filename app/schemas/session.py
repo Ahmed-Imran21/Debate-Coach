@@ -1,7 +1,7 @@
 import uuid
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -36,6 +36,41 @@ class SessionCreateRequest(BaseModel):
         max_length=200,
     )
 
+    # Opt in to visual analysis for this session. Ignored (treated
+    # as not_requested) when VIDEO_ANALYSIS_ENABLED is false.
+    video_analysis: Literal["requested", "not_requested"] = "not_requested"
+
+
+class VideoFinalize(BaseModel):
+    """
+    How the client's video track ended up, sent with POST /start.
+    "uploaded" requires the signal track to already be stored.
+    """
+
+    status: Literal["uploaded", "unavailable"]
+    reason: (
+        Literal[
+            "camera_denied",
+            "unsupported",
+            "model_load_failed",
+            "device_too_slow",
+            "user_opted_out",
+            "upload_failed",
+            "face_not_found",
+        ]
+        | None
+    ) = None
+
+
+class SessionStartRequest(BaseModel):
+    """
+    Optional body for POST /start. An absent body, or an absent
+    `video` field, means exactly what a bodyless call meant before
+    this field existed.
+    """
+
+    video: VideoFinalize | None = None
+
 
 class SessionCreateResponse(BaseModel):
     id: uuid.UUID
@@ -64,6 +99,12 @@ class SessionOut(BaseModel):
 
     created_at: datetime
     updated_at: datetime
+
+    # Video track. Always present; "not_requested" when the
+    # session never asked for it or the feature is off.
+    video_analysis_status: str = "not_requested"
+    video_unavailable_reason: str | None = None
+    visual_coaching_status: str = "not_requested"
 
 
 class FeedbackItemOut(BaseModel):
@@ -105,3 +146,12 @@ class SessionReportOut(BaseModel):
     # Short-lived link to the normalized recording, so the
     # client can play back what was analyzed.
     audio_url: str | None
+
+    # Video track (additive; all null/"not_requested" when the
+    # feature is off or the session did not request it).
+    video_analysis_status: str = "not_requested"
+    video_unavailable_reason: str | None = None
+    visual_coaching_status: str = "not_requested"
+    video_analysis: dict[str, Any] | None = None
+    correlated_moments: list[dict[str, Any]] | None = None
+    visual_feedback: dict[str, Any] | None = None
