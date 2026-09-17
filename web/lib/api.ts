@@ -99,6 +99,14 @@ async function refreshTokens(): Promise<boolean> {
 interface RequestOptions {
   method?: string;
   body?: unknown;
+  /**
+   * Sent as-is (not JSON-stringified) when present; body is
+   * ignored. For the one caller that PUTs a gzip-compressed
+   * payload (visual signals) rather than JSON. Safe to retry on
+   * 401: callers pass a Blob/Uint8Array, never a stream.
+   */
+  rawBody?: BodyInit;
+  headers?: Record<string, string>;
   auth?: boolean;
   retryOnAuthFailure?: boolean;
 }
@@ -110,13 +118,15 @@ async function request<T>(
   const {
     method = "GET",
     body,
+    rawBody,
+    headers: extraHeaders,
     auth = true,
     retryOnAuthFailure = true,
   } = options;
 
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...extraHeaders };
 
-  if (body !== undefined) {
+  if (rawBody === undefined && body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
 
@@ -128,7 +138,7 @@ async function request<T>(
   const response = await fetch(`${BASE}${path}`, {
     method,
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: rawBody !== undefined ? rawBody : body === undefined ? undefined : JSON.stringify(body),
   });
 
   // An expired access token is the common case, not an error.
@@ -208,9 +218,11 @@ export function deleteSession(id: string): Promise<void> {
   return request<void>(`/v1/sessions/${id}`, { method: "DELETE" });
 }
 
-function createSession(input: {
+export function createSession(input: {
   content_type: string;
   title: string | null;
+  /** Defaults to "not_requested" server-side when omitted. */
+  video_analysis?: "requested" | "not_requested";
 }): Promise<SessionCreated> {
   return request<SessionCreated>("/v1/sessions", {
     method: "POST",
@@ -218,9 +230,41 @@ function createSession(input: {
   });
 }
 
-function startSession(id: string): Promise<SessionSummary> {
+export interface VideoFinalize {
+  status: "uploaded" | "unavailable";
+  reason?: string;
+}
+
+/**
+ * video is omitted entirely (not even as {video: undefined}) when
+ * not given, so a caller with no video outcome gets exactly the
+ * bodyless POST this route has always accepted.
+ */
+export function startSession(id: string, video?: VideoFinalize): Promise<SessionSummary> {
   return request<SessionSummary>(`/v1/sessions/${id}/start`, {
     method: "POST",
+    body: video ? { video } : undefined,
+  });
+}
+
+/**
+ * PUT a built, already-serialized-and-compressed VisualSignalTrack.
+ * gzip is preferred (see features/video-analysis/upload.ts); pass
+ * null contentEncoding to send plain JSON when CompressionStream
+ * isn't available.
+ */
+export function uploadVisualSignals(
+  sessionId: string,
+  body: BodyInit,
+  contentEncoding: "gzip" | null,
+): Promise<{ status: string; frames: number }> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (contentEncoding) headers["Content-Encoding"] = contentEncoding;
+
+  return request(`/v1/sessions/${sessionId}/visual-signals`, {
+    method: "PUT",
+    rawBody: body,
+    headers,
   });
 }
 
