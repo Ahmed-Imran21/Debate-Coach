@@ -232,15 +232,21 @@ def _nearest_column(
     return out
 
 
+def _grid_in_gap(grid_t: np.ndarray, gaps: Sequence) -> np.ndarray:
+    out = np.zeros(grid_t.shape, dtype=bool)
+    for gap in gaps:
+        out |= (grid_t >= gap.start) & (grid_t <= gap.end)
+    return out
+
+
 def _mask_gaps(grid_t: np.ndarray, columns: dict[str, np.ndarray], gaps: Sequence) -> None:
     """In place: NaN every column within any gap interval."""
 
-    for gap in gaps:
-        inside = (grid_t >= gap.start) & (grid_t <= gap.end)
-        if not inside.any():
-            continue
-        for arr in columns.values():
-            arr[inside] = np.nan
+    inside_any = _grid_in_gap(grid_t, gaps)
+    if not inside_any.any():
+        return
+    for arr in columns.values():
+        arr[inside_any] = np.nan
 
 
 def _rolling_stat_3(x: np.ndarray, stat) -> np.ndarray:
@@ -291,9 +297,19 @@ class PreparedSignals:
     face_scale: np.ndarray
     facing: np.ndarray           # bool, only meaningful where face_ok
     facing_confidence_low: bool  # calibration missing or unstable
+    baseline_yaw: float
+    baseline_pitch: float
+    baseline_iris_x: float
+    baseline_iris_y: float
+
+    in_gap: np.ndarray           # bool, grid points inside a recorded gap
 
     lh_present: np.ndarray       # float 0/1/NaN
     rh_present: np.ndarray
+    lh_cx: np.ndarray
+    lh_cy: np.ndarray            # width-unit-converted, see _hand_speed's aspect conversion
+    rh_cx: np.ndarray
+    rh_cy: np.ndarray            # width-unit-converted
     lh_speed: np.ndarray         # fs/s
     rh_speed: np.ndarray
     hand_any_visible: np.ndarray  # bool
@@ -421,6 +437,10 @@ def prepare_signals(
     rh_speed = _hand_speed(interp["rh_cx"], interp["rh_cy"], nearest["rh_present"])
     hand_any_visible = (nearest["lh_present"] == 1) | (nearest["rh_present"] == 1)
 
+    hand_aspect = track.capture.frame_height / track.capture.frame_width
+    lh_cy_w = interp["lh_cy"] * hand_aspect
+    rh_cy_w = interp["rh_cy"] * hand_aspect
+
     both_nan = np.isnan(lh_speed) & np.isnan(rh_speed)
     hand_speed = np.nanmax(
         np.stack([np.nan_to_num(lh_speed, nan=-np.inf), np.nan_to_num(rh_speed, nan=-np.inf)]),
@@ -451,8 +471,17 @@ def prepare_signals(
         face_scale=interp["face_scale"],
         facing=facing,
         facing_confidence_low=facing_confidence_low,
+        baseline_yaw=b_yaw,
+        baseline_pitch=b_pitch,
+        baseline_iris_x=b_ix,
+        baseline_iris_y=b_iy,
+        in_gap=_grid_in_gap(grid_t, track.gaps),
         lh_present=nearest["lh_present"],
         rh_present=nearest["rh_present"],
+        lh_cx=interp["lh_cx"],
+        lh_cy=lh_cy_w,
+        rh_cx=interp["rh_cx"],
+        rh_cy=rh_cy_w,
         lh_speed=lh_speed,
         rh_speed=rh_speed,
         hand_any_visible=hand_any_visible,
