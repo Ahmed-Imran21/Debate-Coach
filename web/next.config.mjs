@@ -11,6 +11,11 @@ const nextConfig = {
     // storage origin has to be allowed for connect-src too.
     const storageOrigin = process.env.NEXT_PUBLIC_STORAGE_ORIGIN ?? "";
 
+    // `next dev` sets NODE_ENV to "development" before loading this
+    // file; `next build` and `next start` set "production". Anything
+    // unexpected falls through to the strict (production) policy.
+    const isDev = process.env.NODE_ENV === "development";
+
     const csp = [
       "default-src 'self'",
       // 'unsafe-inline' is required: the App Router ships the RSC
@@ -25,7 +30,12 @@ const nextConfig = {
       // MediaPipe runtime at all under a strict script-src. Only
       // loaded post opt-in (see features/video-analysis), and
       // only from same-origin /mediapipe/wasm — never a CDN.
-      "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
+      // 'unsafe-eval' is added in development only: `next dev` wraps
+      // each module in eval() for source maps and Fast Refresh, and
+      // without it hydration never runs — forms then fall back to a
+      // native GET that puts their fields in the URL. Next's
+      // production bundles don't use eval(), so builds stay strict.
+      `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'${isDev ? " 'unsafe-eval'" : ""}`,
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data:",
       "font-src 'self'",
