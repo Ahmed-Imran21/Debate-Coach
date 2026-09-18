@@ -261,6 +261,16 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
   // ---------------------------------------------------------------
 
   const processTick = useCallback((frameTimeMs: number) => {
+    // TEMP: literal first statement, before any guard — confirms
+    // whether processTick() is being called per frame at all, and
+    // which early-return below is firing if framing never updates.
+    console.info("[vision-debug] processTick() called", {
+      frameTimeMs,
+      hasVideo: videoRef.current !== null,
+      hasExtractor: extractorRef.current !== null,
+      lastMpTimestamp: lastMpTimestampRef.current,
+    });
+
     const video = videoRef.current;
     const extractor = extractorRef.current;
     if (!video || !extractor) return;
@@ -441,6 +451,15 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
   }, []);
 
   const loopStep = useCallback(() => {
+    // TEMP: literal first statement — confirms loopStep() itself is
+    // being (re)invoked at all, independent of whether it goes on to
+    // schedule a frame callback below.
+    console.info("[vision-debug] loopStep() called", {
+      hasVideo: videoRef.current !== null,
+      hasStream: streamRef.current !== null,
+      schedulerDisabled: schedulerRef.current.isDisabled,
+    });
+
     const video = videoRef.current;
     if (!video || !streamRef.current) return;
 
@@ -455,6 +474,19 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
       requestVideoFrameCallback?: (cb: (now: number, metadata: VideoFrameCallbackMetadata) => void) => number;
       cancelVideoFrameCallback?: (handle: number) => void;
     };
+
+    // TEMP: item 3 of the "zero tick lines" investigation — confirms
+    // rVFC is actually available/used (vs the rAF fallback) and that
+    // the video element already has real frames by the time we try
+    // to schedule off of it.
+    console.info("[vision-debug] loopStep() scheduling", {
+      hasRvfc: typeof withRvfc.requestVideoFrameCallback === "function",
+      readyState: video.readyState,
+      currentTime: video.currentTime,
+      paused: video.paused,
+      videoWidth: video.videoWidth,
+      videoHeight: video.videoHeight,
+    });
 
     if (typeof withRvfc.requestVideoFrameCallback === "function") {
       usingRvfcRef.current = true;

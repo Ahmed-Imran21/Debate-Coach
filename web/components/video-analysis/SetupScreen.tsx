@@ -98,6 +98,38 @@ export default function SetupScreen({ capture, onReady, onSkip }: Props): ReactE
 
   return (
     <div className="form-panel" style={{ maxWidth: "34rem" }}>
+      {/*
+        Bug fix (2026-09-18): this was the only place in the setup
+        flow capture.videoRef could get attached to a real <video>
+        element — Recorder.tsx only renders one during phase ===
+        "recording". With no element here, videoRef.current stayed
+        null for the whole setup screen: acquireAndStartSetup()'s
+        `if (videoRef.current) { srcObject = stream; ... }` never
+        ran, and loopStep()'s own `if (!video || ...) return;` guard
+        fired on every single call, so it never even scheduled a
+        rVFC/rAF callback — processTick() was never invoked, not
+        once, and framing stayed frozen at its initial defaults.
+        Kept mounted (not step-conditional) so the ref stays stable
+        across every step, and visible so the framing/calibration
+        instructions ("move closer", "look at the camera") have
+        something to actually check against.
+      */}
+      <video
+        ref={capture.videoRef}
+        muted
+        playsInline
+        autoPlay
+        style={{
+          width: "100%",
+          aspectRatio: "16 / 9",
+          background: "var(--well)",
+          borderRadius: "var(--radius)",
+          transform: "scaleX(-1)",
+          objectFit: "cover",
+          marginBottom: "1.25rem",
+        }}
+      />
+
       {step === "framing" && (
         <>
           <h2 style={{ fontSize: "var(--step-2)", marginBottom: "0.75rem" }}>Framing</h2>
