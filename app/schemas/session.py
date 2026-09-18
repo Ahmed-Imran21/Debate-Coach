@@ -79,6 +79,12 @@ class SessionCreateResponse(BaseModel):
     upload_headers: dict[str, str]
     expires_in_seconds: int
 
+    # Same contract as SessionOut: always present, "not_requested"
+    # when video analysis wasn't asked for or the flag is off.
+    video_analysis_status: str = "not_requested"
+    video_unavailable_reason: str | None = None
+    visual_coaching_status: str = "not_requested"
+
 
 class SessionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
