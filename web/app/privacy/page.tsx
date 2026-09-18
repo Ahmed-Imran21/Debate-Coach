@@ -49,10 +49,10 @@ export default function PrivacyPage(): ReactElement {
 
             {/* LEGAL REVIEW REQUIRED: describes the optional camera
                 analysis feature (task doc §10). Confirm this framing
-                (no video ever transmitted, only derived numbers) and
-                the MediaPipe telemetry disclosure meet applicable
-                requirements before this feature is enabled for any
-                user. */}
+                (no video ever transmitted, only derived numbers; the
+                MediaPipe telemetry request is blocked, not merely
+                undisclosed) meets applicable requirements before this
+                feature is enabled for any user. */}
             <h3>Camera-based delivery analysis (optional)</h3>
             <p>
               If you turn on visual feedback for a session, your browser
@@ -63,14 +63,17 @@ export default function PrivacyPage(): ReactElement {
               appear to be facing the camera, and where your hands are and
               how much they move over time. This feature is off by default
               and only ever runs for a session where you explicitly turn it
-              on. MediaPipe itself sends its own usage and performance
-              statistics to Google; see{" "}
+              on. MediaPipe normally sends its own anonymous usage and
+              performance statistics to Google (see{" "}
               <a href="https://goo.gle/mediapipe-privacy" target="_blank" rel="noreferrer">
                 MediaPipe&rsquo;s privacy notice
               </a>
-              . The derived numbers, and any coaching feedback generated
-              from them, are stored and deleted on the same terms as the
-              rest of a session&rsquo;s analysis, described below.
+              ); our browser sends a Content-Security-Policy header that
+              blocks that specific request before it leaves your device, so
+              this app does not make it. The derived numbers, and any
+              coaching feedback generated from them, are stored and deleted
+              on the same terms as the rest of a session&rsquo;s analysis,
+              described below.
             </p>
 
             <h3>Analysis output</h3>
@@ -125,10 +128,13 @@ export default function PrivacyPage(): ReactElement {
             <h3>Google (MediaPipe)</h3>
             <p>
               If you turn on the optional camera-based delivery analysis
-              described above, the on-device MediaPipe library sends its
-              own usage and performance statistics to Google. This is
-              separate from Gemini and happens only for sessions where
-              you enable that feature.
+              described above, your browser runs Google&rsquo;s MediaPipe
+              library on-device. MediaPipe would normally also send its
+              own anonymous usage and performance statistics to Google in
+              the background, separately from the camera analysis itself
+              &mdash; we block that specific request (see the
+              Camera-based delivery analysis section above), so no data
+              reaches Google through this path.
             </p>
 
             <h3>Object storage and hosting</h3>

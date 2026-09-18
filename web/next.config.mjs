@@ -39,6 +39,16 @@ const nextConfig = {
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data:",
       "font-src 'self'",
+      // Deliberately does NOT include odml.pa.googleapis.com.
+      // MediaPipe Tasks' JS runtime batches its own anonymous
+      // usage/performance telemetry and POSTs it there every 60s
+      // (see @mediapipe/tasks-vision's internal log-sender). It is
+      // not required for face/hand detection to work — CSP blocking
+      // it only drops that one background call, visible as a
+      // harmless "Refused to connect" console warning. Left out
+      // on purpose, matching this app's stance elsewhere (no
+      // third-party analytics, same-origin fonts/models): see
+      // privacy policy §"Camera-based delivery analysis".
       `connect-src 'self' ${apiOrigin} ${storageOrigin}`.trim(),
       "media-src 'self' blob: https:",
       "frame-ancestors 'none'",

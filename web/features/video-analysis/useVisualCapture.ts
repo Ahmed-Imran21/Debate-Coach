@@ -174,6 +174,15 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
   const trackBuilderRef = useRef<TrackBuilder>(new TrackBuilder());
   const sourceRef = useRef<Source | null>(null);
 
+  // True from the start of acquireAndStartSetup() until a session
+  // actually ends (endRecording/abandon/unmount). Guards against a
+  // second concurrent acquire — a fast double-click on "Start
+  // recording", or an effect re-run (React Strict Mode's mount
+  // simulation, or a Next.js Fast Refresh mid-session) — opening a
+  // second camera stream + extractor + tick loop that leaks the
+  // first set instead of reusing it.
+  const sessionActiveRef = useRef(false);
+
   const loopHandleRef = useRef<number | null>(null);
   const usingRvfcRef = useRef(false);
   const lastMpTimestampRef = useRef<number>(-1);
@@ -268,7 +277,13 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
     let result: FrameResult;
     try {
       result = extractor.processFrame(video, frameTimeMs, runHands);
-    } catch {
+    } catch (err) {
+      // TEMP: was silently swallowed. This is exactly what a
+      // disposed-but-still-referenced extractor looks like (the
+      // "stuck framing" bug): every tick throws here, and framing
+      // state below never updates again. Surfacing it so a real
+      // recurrence is visible instead of silent.
+      console.warn("[vision-debug] processFrame() threw; skipping this tick", err);
       return; // a single bad frame should not kill the loop
     }
     // frameTimeMs is this tick's nominal start (capture/presentation
@@ -333,9 +348,24 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
       lightingUpdate = classifyLighting(meanLuma, faceLuma);
     }
 
+    const faceVisibleCheck = faceVisiblePasses(faceVisibleWindowRef.current);
+    const distanceCheck = classifyDistance(faceScaleWindowRef.current);
+
+    // TEMP diagnostic logging for the "framing permanently stuck"
+    // bug. Remove once confirmed fixed (or gate behind a debug flag
+    // if it turns out worth keeping longer-term).
+    console.info("[vision-debug] tick", {
+      facesDetected: result.faces.length,
+      faceScale,
+      faceVisibleRatio: Number(ratioTrue(faceVisibleWindowRef.current).toFixed(2)),
+      windowLen: faceVisibleWindowRef.current.length,
+      faceVisibleCheck,
+      distanceCheck,
+    });
+
     setFraming((prev) => ({
-      faceVisible: faceVisiblePasses(faceVisibleWindowRef.current),
-      distance: classifyDistance(faceScaleWindowRef.current),
+      faceVisible: faceVisibleCheck,
+      distance: distanceCheck,
       handsRaised: handsRaisedPasses(handsRaisedWindowRef.current),
       lighting: lightingUpdate ?? prev.lighting,
     }));
@@ -491,6 +521,18 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
   const acquireAndStartSetup = useCallback(async (): Promise<AcquireResult> => {
     if (!enabled) return { ok: false, audioStream: null, reason: "user_opted_out" };
 
+    // Reentrancy guard (see sessionActiveRef above): a second call
+    // while a session is already being acquired, or is already live
+    // on this instance, would otherwise open a second getUserMedia
+    // stream and a second MediaPipeExtractor, leak the first pair
+    // (never stopped/disposed), and start a second rVFC/rAF tick
+    // loop that stopLoop() can no longer fully cancel (loopHandleRef
+    // only remembers the most recently scheduled handle).
+    if (sessionActiveRef.current) {
+      return { ok: false, audioStream: null, reason: "unsupported" };
+    }
+    sessionActiveRef.current = true;
+
     setStage("requesting");
 
     if (
@@ -498,6 +540,7 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
       !navigator.mediaDevices?.getUserMedia ||
       typeof MediaRecorder === "undefined"
     ) {
+      sessionActiveRef.current = false;
       setStage("unavailable");
       setUnavailableReason("unsupported");
       return { ok: false, audioStream: null, reason: "unsupported" };
@@ -515,9 +558,16 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
         },
       });
     } catch {
+      sessionActiveRef.current = false;
       setStage("unavailable");
       setUnavailableReason("camera_denied");
       return { ok: false, audioStream: null, reason: "camera_denied" };
+    }
+
+    if (!sessionActiveRef.current) {
+      // abandon()/unmount ran while getUserMedia() was pending.
+      stream.getTracks().forEach((t) => t.stop());
+      return { ok: false, audioStream: null, reason: "unsupported" };
     }
 
     streamRef.current = stream;
@@ -530,6 +580,17 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
     const extractor = new MediaPipeExtractor();
     try {
       const init = await extractor.init();
+
+      if (!sessionActiveRef.current) {
+        // abandon()/unmount ran while init() was pending — don't
+        // adopt this extractor, just dispose what we just built
+        // instead of leaking it (see sessionActiveRef above).
+        extractor.dispose();
+        stream.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        return { ok: false, audioStream: null, reason: "unsupported" };
+      }
+
       extractorRef.current = extractor;
       sourceRef.current = {
         platform: "web",
@@ -541,6 +602,7 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
         benchmark_fps: 0,
       };
     } catch {
+      sessionActiveRef.current = false;
       stream.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
       setStage("unavailable");
@@ -550,8 +612,20 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
 
     modeRef.current = "idle";
     lastMpTimestampRef.current = -1;
+    // Fresh session: clear the rolling framing-check windows too, so
+    // a retry after abandon()/camera_denied doesn't start out with
+    // stale entries from a prior attempt still sitting in them.
+    faceVisibleWindowRef.current = [];
+    faceScaleWindowRef.current = [];
+    handsRaisedWindowRef.current = [];
+    faceMissingSinceMsRef.current = null;
+    setFaceMissingSeconds(0);
+    setFraming({ faceVisible: false, distance: "too_far", lighting: "ok", handsRaised: false });
     setStage("setup");
-    loopStep();
+    // Guard against starting a second concurrent tick loop (see
+    // sessionActiveRef above) — this only matters if the guard
+    // above was somehow bypassed, but costs nothing to keep.
+    if (loopHandleRef.current === null) loopStep();
 
     const audioStream = new MediaStream(stream.getAudioTracks());
     return { ok: true, audioStream };
@@ -682,6 +756,7 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
       context: Context,
     ): Promise<{ available: true; track: VisualSignalTrack } | { available: false; reason: UnavailableReason }> => {
       modeRef.current = "idle";
+      sessionActiveRef.current = false;
       stopLoop();
 
       extractorRef.current?.dispose();
@@ -738,6 +813,7 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
 
   /** Bail out at any point in setup (camera denied handled separately, in acquireAndStartSetup). */
   const abandon = useCallback((reason: UnavailableReason) => {
+    sessionActiveRef.current = false;
     stopLoop();
     extractorRef.current?.dispose();
     extractorRef.current = null;
@@ -748,11 +824,32 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
   }, []);
 
   // Stop tracks on unmount, regardless of what stage we're in.
+  //
+  // Root cause of the "framing permanently stuck" bug: this cleanup
+  // disposed extractorRef.current but never nulled the ref out,
+  // unlike endRecording()/abandon() (which both do). Whenever this
+  // ran while a session was live — most plausibly a Next.js Fast
+  // Refresh re-running this effect mid-session while iterating on
+  // this file, though React Strict Mode's one-time mount-simulation
+  // dance would hit the same path if it ever coincided with a live
+  // session — extractorRef.current was left pointing at a
+  // disposed-but-still-truthy extractor. processTick()'s
+  // `if (!video || !extractor) return;` guard didn't catch that
+  // (the ref was still non-null), so every subsequent tick called
+  // processFrame() on it, threw, and was silently swallowed —
+  // freezing framing state at its initial defaults ("Not clearly
+  // visible yet" / "too_far") forever, even with a face right in
+  // frame. sessionActiveRef also gets reset here so a fresh
+  // acquireAndStartSetup() (e.g. after a Fast Refresh) isn't
+  // permanently blocked by the reentrancy guard above.
   useEffect(
     () => () => {
+      sessionActiveRef.current = false;
       stopLoop();
       extractorRef.current?.dispose();
+      extractorRef.current = null;
       streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
     },
     [],
   );
