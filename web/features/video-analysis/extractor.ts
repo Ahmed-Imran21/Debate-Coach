@@ -80,11 +80,20 @@ function modelPath(manifest: Manifest, task: ModelProvenance["task"]): string {
   return `/mediapipe/models/${model.model_id}`;
 }
 
+// TEMP: instance counter for the "framing permanently stuck" bug
+// investigation (2026-09-18). Distinguishes a legitimate init() (one
+// instance, two graphs — face + hand, hence two sets of MediaPipe's
+// own startup log lines) from a real double-init (two instances).
+// Remove once the fix in useVisualCapture.ts is confirmed.
+let debugInstanceCounter = 0;
+
 export class MediaPipeExtractor implements VisionExtractor {
   private faceLandmarker: FaceLandmarkerType | null = null;
   private handLandmarker: HandLandmarkerType | null = null;
+  private readonly debugId = ++debugInstanceCounter; // TEMP, see above
 
   async init(): Promise<InitResult> {
+    console.info(`[vision-debug] extractor#${this.debugId}.init() starting`); // TEMP
     const manifest = await loadManifest();
 
     const vision = await import("@mediapipe/tasks-vision");
@@ -96,6 +105,8 @@ export class MediaPipeExtractor implements VisionExtractor {
     const handPath = modelPath(manifest, "hand_landmarker");
 
     const delegate = await this.createBoth(fileset, FaceLandmarker, HandLandmarker, facePath, handPath);
+
+    console.info(`[vision-debug] extractor#${this.debugId}.init() done, delegate=${delegate}`); // TEMP
 
     return { delegate, runtimeVersion: manifest.runtime_version, models: manifest.models };
   }
@@ -168,6 +179,15 @@ export class MediaPipeExtractor implements VisionExtractor {
   }
 
   dispose(): void {
+    // TEMP: was silent. Logs which call site disposed this instance
+    // (unmount cleanup vs abandon() vs endRecording()) and whether it
+    // was still holding live landmarkers when this ran — the "stuck
+    // framing" bug's actual disposed-but-still-referenced state.
+    console.info(
+      `[vision-debug] extractor#${this.debugId}.dispose() called, ` +
+        `wasLive=${this.faceLandmarker !== null || this.handLandmarker !== null}`,
+      new Error("[vision-debug] dispose() call site").stack,
+    );
     this.faceLandmarker?.close();
     this.handLandmarker?.close();
     this.faceLandmarker = null;
