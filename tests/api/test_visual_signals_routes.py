@@ -60,6 +60,42 @@ def test_request_upload_start_flow(client_for, make_user, fake_storage, fake_job
     assert fake_jobs == [uuid.UUID(sid)]
 
 
+def test_create_response_itself_carries_video_analysis_status(client_for, make_user, db):
+    """
+    POST /sessions's own response must carry the same three fields
+    GET /sessions/{id} does, without needing a follow-up request --
+    this is the field create_session's SessionCreateResponse
+    silently omitted until it was added, and nothing caught it
+    because every other test that checked video_analysis_status
+    re-fetched via GET right after create instead of asserting on
+    the create response directly (see test_request_upload_start_flow
+    above, which does exactly that).
+    """
+
+    created = _create(client_for(make_user("a@test")), video="requested")
+
+    assert created["video_analysis_status"] == "awaiting_upload"
+    assert created["video_unavailable_reason"] is None
+    assert created["visual_coaching_status"] == "not_requested"
+
+
+def test_create_response_defaults_when_body_says_not_requested(client_for, make_user):
+    created = _create(client_for(make_user("a@test")), video="not_requested")
+
+    assert created["video_analysis_status"] == "not_requested"
+    assert created["video_unavailable_reason"] is None
+    assert created["visual_coaching_status"] == "not_requested"
+
+
+def test_create_response_defaults_when_flag_is_off_even_if_requested(client_for, make_user, video_flag):
+    video_flag(False)
+    created = _create(client_for(make_user("a@test")), video="requested")
+
+    assert created["video_analysis_status"] == "not_requested"
+    assert created["video_unavailable_reason"] is None
+    assert created["visual_coaching_status"] == "not_requested"
+
+
 def test_reupload_replaces_until_processing_starts(client_for, make_user, fake_storage, db):
     from app.models.video_analysis import VideoAnalysis
     from datetime import datetime, timezone

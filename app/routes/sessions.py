@@ -74,12 +74,23 @@ def _video_rows(db: Session, session_ids: list[uuid.UUID]) -> dict[uuid.UUID, Vi
     return {row.session_id: row for row in rows}
 
 
+def _apply_video_fields(target: SessionOut | SessionCreateResponse, video: VideoAnalysis | None) -> None:
+    """
+    Shared by every response that carries the three video-analysis
+    fields (SessionOut, SessionCreateResponse): both default to
+    "not_requested"/None on their own, so there's nothing to do
+    when there's no row; otherwise copy the row's real values.
+    """
+
+    if video is not None:
+        target.video_analysis_status = video.status
+        target.video_unavailable_reason = video.unavailable_reason
+        target.visual_coaching_status = video.coaching_status
+
+
 def _session_out(debate_session: DebateSession, video: VideoAnalysis | None) -> SessionOut:
     out = SessionOut.model_validate(debate_session)
-    if video is not None:
-        out.video_analysis_status = video.status
-        out.video_unavailable_reason = video.unavailable_reason
-        out.visual_coaching_status = video.coaching_status
+    _apply_video_fields(out, video)
     return out
 
 
@@ -163,13 +174,15 @@ def create_session(
         content_type=content_type,
     )
 
-    return SessionCreateResponse(
+    response = SessionCreateResponse(
         id=debate_session.id,
         status=debate_session.status,
         upload_url=upload_url,
         upload_headers={"Content-Type": content_type},
         expires_in_seconds=settings.storage_url_expiry_seconds,
     )
+    _apply_video_fields(response, _video_row(db, debate_session.id))
+    return response
 
 
 # ============================================================
