@@ -322,6 +322,83 @@ Should print `google.auth.impersonated_credentials.Credentials
 debate-coach-dev@debate-coach-508804.iam.gserviceaccount.com` — not
 a stale email, and not a crash.
 
+#### Bucket CORS (required — the browser uploads straight to GCS)
+
+Recordings are PUT from the browser directly to a signed
+`storage.googleapis.com` URL, so the bucket needs a CORS policy
+allowing your local dev origin. Without one the upload surfaces as
+a generic "The recording could not be sent" in the UI, with
+`CORS header 'Access-Control-Allow-Origin' missing` in the console.
+
+Already applied to `debate-coach-508804-dev-recordings`. To set it
+on a new dev bucket, put this in a file:
+
+```json
+[
+  {
+    "origin": ["http://localhost:3000", "http://localhost:3001"],
+    "method": ["PUT"],
+    "responseHeader": ["Content-Type", "Content-Length", "ETag"],
+    "maxAgeSeconds": 60
+  }
+]
+```
+
+```bash
+gcloud storage buckets update gs://<your-dev-bucket> \
+  --project=debate-coach-508804 --cors-file=<that-file>.json
+```
+
+`localhost:3001` is there because `next dev` falls back to it when
+3000 is taken. `maxAgeSeconds: 60` is deliberately short: browsers
+cache preflight results, and a long TTL means a CORS fix appears
+not to work for up to an hour. Production uses 3600, which is fine
+for a config that doesn't change.
+
+**The `responseHeader` gotcha — this one cost a full day.** In a GCS
+CORS config, `responseHeader` is not only
+`Access-Control-Expose-Headers` for actual responses. It is *also*
+the allowlist GCS validates `Access-Control-Request-Headers` against
+on the preflight. Set it to `[]` and no preflight naming any header
+can ever succeed: GCS answers `OPTIONS` with a bare `200` carrying
+no CORS headers at all.
+
+That is exactly what a browser upload triggers. The PUT sends
+`Content-Type: audio/webm`, which is not one of the three
+CORS-safelisted Content-Type values, so the browser is *required* to
+preflight with `Access-Control-Request-Headers: content-type`. With
+`Content-Type` missing from `responseHeader`, that preflight fails
+and the real PUT is never sent. Keep `Content-Type` in the list.
+
+Do not reason about this field from "which response headers does my
+JS actually read" — that reasoning yields an empty list and a
+broken bucket. Match the shape above.
+
+**Verify with curl, not `gcloud describe`.** Two reasons. First,
+`gcloud storage buckets describe --format="json(cors)"` silently
+prints `null` — the field is named `cors_config`, and an unmatched
+key in a `--format` projection returns empty rather than erroring,
+so a wrong guess looks identical to an unconfigured bucket. Use
+`--format="yaml(cors_config)"`. Second, and more importantly, a
+correct-looking config still tells you nothing about whether the
+*preflight* passes. Ask Google directly, with a freshly generated
+signed URL (they expire in 15 minutes):
+
+```bash
+curl -i -X OPTIONS "<upload_url>" \
+  -H "Origin: http://localhost:3000" \
+  -H "Access-Control-Request-Method: PUT" \
+  -H "Access-Control-Request-Headers: content-type"
+```
+
+A working bucket returns `access-control-allow-origin`,
+`access-control-allow-methods` and `access-control-allow-headers`.
+A broken one returns `200` with only `vary: Origin` — which is the
+failure mode above, and is indistinguishable from success if you
+only look at the status code. Note that the *actual* PUT returns
+`access-control-allow-origin` even when the preflight doesn't, so
+testing the PUT alone will mislead you; test the `OPTIONS`.
+
 ### 4. Frontend — required `web/.env.local` values
 
 At minimum:
