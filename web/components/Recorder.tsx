@@ -140,78 +140,95 @@ export default function Recorder(): ReactElement {
       streamRef.current = audioStream;
       chunksRef.current = [];
 
-      const recorder = new MediaRecorder(audioStream, { mimeType });
-      recorderRef.current = recorder;
+      // Defense in depth: MediaRecorder.start() throws synchronously
+      // (it doesn't return a Promise) if audioStream has no live
+      // tracks — confirmed possible via a stream-lifecycle bug in
+      // handleSetupSkip (fixed alongside this, see abandon()'s
+      // keepAudioTrack option), and plausible for other reasons too
+      // (mic unplugged mid-flow, browser quirks). Without this catch
+      // that throw was uncaught — no user feedback, and everything
+      // set up below (AudioContext, the level-meter rAF loop, the
+      // elapsed-time interval) was left running with no recorder
+      // attached to ever stop it via the normal onstop path.
+      try {
+        const recorder = new MediaRecorder(audioStream, { mimeType });
+        recorderRef.current = recorder;
 
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data);
-      };
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) chunksRef.current.push(event.data);
+        };
 
-      recorder.onstart = () => {
-        if (usingVideoRef.current) {
-          const t0 = performance.now();
-          videoT0MsRef.current = t0;
-          capture.beginRecording(t0);
-        }
-      };
+        recorder.onstart = () => {
+          if (usingVideoRef.current) {
+            const t0 = performance.now();
+            videoT0MsRef.current = t0;
+            capture.beginRecording(t0);
+          }
+        };
 
-      recorder.onstop = () => {
-        setBlob(new Blob(chunksRef.current, { type: mimeType }));
-        setPhase("review");
-        teardown();
+        recorder.onstop = () => {
+          setBlob(new Blob(chunksRef.current, { type: mimeType }));
+          setPhase("review");
+          teardown();
 
-        if (usingVideoRef.current && videoT0MsRef.current !== null) {
-          const durationS = (performance.now() - videoT0MsRef.current) / 1000;
-          videoFinalizePromiseRef.current = capture
-            .endRecording(durationS, videoContextRef.current)
-            .then((result) => {
-              if (result.available) {
-                videoTrackReadyRef.current = result.track;
-              } else {
-                videoTrackReadyRef.current = null;
-                videoOutcomeRef.current = { status: "unavailable", reason: result.reason };
-              }
-            });
-        }
-      };
+          if (usingVideoRef.current && videoT0MsRef.current !== null) {
+            const durationS = (performance.now() - videoT0MsRef.current) / 1000;
+            videoFinalizePromiseRef.current = capture
+              .endRecording(durationS, videoContextRef.current)
+              .then((result) => {
+                if (result.available) {
+                  videoTrackReadyRef.current = result.track;
+                } else {
+                  videoTrackReadyRef.current = null;
+                  videoOutcomeRef.current = { status: "unavailable", reason: result.reason };
+                }
+              });
+          }
+        };
 
-      // Level meter. This is the one moving thing on the page and
-      // it exists to confirm the microphone is actually picking
-      // you up, not for decoration.
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
+        // Level meter. This is the one moving thing on the page and
+        // it exists to confirm the microphone is actually picking
+        // you up, not for decoration.
+        const audioContext = new AudioContext();
+        audioContextRef.current = audioContext;
 
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 512;
-      audioContext.createMediaStreamSource(audioStream).connect(analyser);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 512;
+        audioContext.createMediaStreamSource(audioStream).connect(analyser);
 
-      const samples = new Uint8Array(analyser.frequencyBinCount);
+        const samples = new Uint8Array(analyser.frequencyBinCount);
 
-      const measure = () => {
-        analyser.getByteTimeDomainData(samples);
+        const measure = () => {
+          analyser.getByteTimeDomainData(samples);
 
-        let sum = 0;
-        for (const sample of samples) {
-          const centred = (sample - 128) / 128;
-          sum += centred * centred;
-        }
+          let sum = 0;
+          for (const sample of samples) {
+            const centred = (sample - 128) / 128;
+            sum += centred * centred;
+          }
 
-        const rms = Math.sqrt(sum / samples.length);
-        setLevel(Math.min(100, Math.round(rms * 260)));
+          const rms = Math.sqrt(sum / samples.length);
+          setLevel(Math.min(100, Math.round(rms * 260)));
+
+          frameRef.current = requestAnimationFrame(measure);
+        };
 
         frameRef.current = requestAnimationFrame(measure);
-      };
 
-      frameRef.current = requestAnimationFrame(measure);
+        const startedAt = Date.now();
+        setElapsed(0);
+        tickRef.current = setInterval(() => {
+          setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+        }, 250);
 
-      const startedAt = Date.now();
-      setElapsed(0);
-      tickRef.current = setInterval(() => {
-        setElapsed(Math.floor((Date.now() - startedAt) / 1000));
-      }, 250);
-
-      recorder.start();
-      setPhase("recording");
+        recorder.start();
+        setPhase("recording");
+      } catch {
+        recorderRef.current = null;
+        teardown(); // safely no-ops on whatever wasn't reached yet — every ref is null-checked
+        setError("Could not start recording. Try again.");
+        setPhase("idle");
+      }
     },
     [capture, teardown],
   );
@@ -310,7 +327,17 @@ export default function Recorder(): ReactElement {
       status: "unavailable",
       reason: capture.unavailableReason ?? "user_opted_out",
     };
-    capture.abandon(capture.unavailableReason ?? "user_opted_out");
+    // keepAudioTrack: true — every onSkip caller (the two manual
+    // "Skip visual feedback" buttons and the too-slow-benchmark
+    // auto-skip) falls through to armRecorder() below and keeps
+    // recording audio-only, same as camera_denied/model_load_failed
+    // elsewhere. Without this, abandon() stopped every track on the
+    // combined stream, including the audio track armRecorder is
+    // about to start a MediaRecorder on two lines down — which threw
+    // "The MediaStream is inactive" every single time (confirmed:
+    // pendingAudioStreamRef's MediaStream wraps the same live audio
+    // track object(s) as the one abandon() was stopping, not a copy).
+    capture.abandon(capture.unavailableReason ?? "user_opted_out", { keepAudioTrack: true });
 
     const audioStream = pendingAudioStreamRef.current;
     pendingAudioStreamRef.current = null;
