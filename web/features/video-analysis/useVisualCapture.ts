@@ -843,13 +843,31 @@ export function useVisualCapture(options: UseVisualCaptureOptions) {
     [calibration, framing],
   );
 
-  /** Bail out at any point in setup (camera denied handled separately, in acquireAndStartSetup). */
-  const abandon = useCallback((reason: UnavailableReason) => {
+  /**
+   * Bail out at any point in setup (camera denied handled
+   * separately, in acquireAndStartSetup).
+   *
+   * keepAudioTrack: the caller (Recorder.tsx's handleSetupSkip) may
+   * still be holding a MediaStream wrapping this same session's
+   * audio track(s) — acquireAndStartSetup() hands one back via
+   * `new MediaStream(stream.getAudioTracks())`, which doesn't clone
+   * the tracks, just wraps the same live objects — and intends to
+   * keep recording audio-only after "skipping" video. Stopping
+   * every track unconditionally here would stop that shared audio
+   * track too, right before MediaRecorder.start() runs on it, which
+   * throws "The MediaStream is inactive" (confirmed bug, all three
+   * onSkip callers). Defaults to false so every other caller keeps
+   * today's "stop everything" behavior.
+   */
+  const abandon = useCallback((reason: UnavailableReason, opts?: { keepAudioTrack?: boolean }) => {
     sessionActiveRef.current = false;
     stopLoop();
     extractorRef.current?.dispose();
     extractorRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current?.getVideoTracks().forEach((t) => t.stop());
+    if (!opts?.keepAudioTrack) {
+      streamRef.current?.getAudioTracks().forEach((t) => t.stop());
+    }
     streamRef.current = null;
     setStage("unavailable");
     setUnavailableReason(reason);
