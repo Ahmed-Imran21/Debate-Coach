@@ -47,6 +47,7 @@ from audio.transcriber import transcribe_audio
 
 from raw_metrics.metrics import analyze_metrics
 
+from speech_analysis.llm.client import SpeechAnalysisValidationError
 from speech_analysis.speech_analyzer import analyze_speech
 
 from coaching_engine.engine import CoachingEngine
@@ -129,6 +130,34 @@ def run_session_pipeline(session_id: UUID) -> None:
             session_id,
             traceback.format_exc(),
         )
+
+        # speech_analysis/ has no storage dependency of its own (see
+        # SpeechAnalysisValidationError's docstring), so persisting
+        # the raw LLM response that failed validation happens here —
+        # this is the outer boundary that has both. debate_session
+        # is still in scope even though workdir (the local copy) is
+        # already gone by this point (the inner `finally:
+        # shutil.rmtree` above already ran); the raw text lives on
+        # the exception object itself, not on disk, so that's fine.
+        # Best-effort: a storage failure here must not shadow the
+        # original error or stop _fail() from recording it below.
+        if isinstance(error, SpeechAnalysisValidationError):
+            try:
+                storage.upload_bytes(
+                    storage.build_object_key(
+                        debate_session.user_id,
+                        debate_session.id,
+                        "speech_analysis_failure.json",
+                    ),
+                    error.raw_response.encode("utf-8"),
+                    content_type="application/json",
+                )
+            except Exception:
+                logger.error(
+                    "Could not persist the failing speech-analysis "
+                    "response for session %s.",
+                    session_id,
+                )
 
         _fail(
             db,
