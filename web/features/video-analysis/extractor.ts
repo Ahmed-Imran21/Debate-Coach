@@ -61,9 +61,19 @@ export interface VisionExtractor {
   dispose(): void;
 }
 
+// The actual shape of an entry in public/mediapipe/manifest.json.
+// Distinct from ModelProvenance on purpose: `path` is real and used
+// below by modelPath(), but it is not part of the backend's
+// visual_analysis/schema.py ModelInfo (extra="forbid", exactly
+// task/model_id/sha256) and must never reach it. See
+// toModelProvenance().
+export interface RawManifestModel extends ModelProvenance {
+  path: string;
+}
+
 interface Manifest {
   runtime_version: string;
-  models: ModelProvenance[];
+  models: RawManifestModel[];
 }
 
 async function loadManifest(): Promise<Manifest> {
@@ -80,12 +90,45 @@ function modelPath(manifest: Manifest, task: ModelProvenance["task"]): string {
   return `/mediapipe/models/${model.model_id}`;
 }
 
+/**
+ * Projects manifest.json's model entries down to exactly the three
+ * fields the backend's ModelInfo schema accepts before they reach
+ * VisualSignalTrack.source.models.
+ *
+ * Confirmed bug (2026-09-19): init() used to forward manifest.models
+ * verbatim, `path` included. `path` is real and needed locally (see
+ * modelPath()), but the backend's ModelInfo(_Strict) uses
+ * extra="forbid" — Pydantic rejects any unrecognized field, not just
+ * missing ones — so every session with video analysis on failed at
+ * the visual-signals upload step with 422 invalid_schema
+ * ("source.models.0.path: Extra inputs are not permitted"), all
+ * retries exhausted identically since the payload never changed,
+ * and the report surfaced this as "The captured visual data
+ * couldn't be uploaded." Exported so the cross-language fixture
+ * test (track.test.ts) can feed it the real manifest.json and prove
+ * the two schemas agree, instead of hand-typing a models array that
+ * would never have caught this.
+ */
+export function toModelProvenance(models: readonly RawManifestModel[]): ModelProvenance[] {
+  return models.map(({ task, model_id, sha256 }) => ({ task, model_id, sha256 }));
+}
+
 // TEMP: instance counter for the "framing permanently stuck" bug
 // investigation (2026-09-18). Distinguishes a legitimate init() (one
 // instance, two graphs — face + hand, hence two sets of MediaPipe's
 // own startup log lines) from a real double-init (two instances).
 // Remove once the fix in useVisualCapture.ts is confirmed.
 let debugInstanceCounter = 0;
+
+// TEMP diagnostic (2026-09-19), not a fix: flip to 1 to test whether
+// numFaces: 2 (second-person detection, §0.3.4) is what triggers the
+// ImageToTensorCalculator "roi->width > 0 && roi->height > 0"
+// RET_CHECK crash — a known MediaPipe issue class when a second,
+// edge-clipped/degenerate face candidate produces a zero-area ROI.
+// Requires a fresh "Start recording" click after changing this
+// (Fast Refresh mid-session isn't reliable for a class field default
+// like this one). Revert to 2 once diagnosed either way.
+const DIAGNOSTIC_NUM_FACES = 2;
 
 export class MediaPipeExtractor implements VisionExtractor {
   private faceLandmarker: FaceLandmarkerType | null = null;
@@ -108,7 +151,11 @@ export class MediaPipeExtractor implements VisionExtractor {
 
     console.info(`[vision-debug] extractor#${this.debugId}.init() done, delegate=${delegate}`); // TEMP
 
-    return { delegate, runtimeVersion: manifest.runtime_version, models: manifest.models };
+    return {
+      delegate,
+      runtimeVersion: manifest.runtime_version,
+      models: toModelProvenance(manifest.models),
+    };
   }
 
   private async createBoth(
@@ -123,7 +170,7 @@ export class MediaPipeExtractor implements VisionExtractor {
         this.faceLandmarker = await FaceLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: facePath, delegate },
           runningMode: "VIDEO",
-          numFaces: 2,
+          numFaces: DIAGNOSTIC_NUM_FACES, // TEMP, see above — normally 2
           outputFaceBlendshapes: false,
           outputFacialTransformationMatrixes: true,
         });
@@ -153,6 +200,17 @@ export class MediaPipeExtractor implements VisionExtractor {
     if (!this.faceLandmarker || !this.handLandmarker) {
       throw new Error("MediaPipeExtractor.processFrame() called before init() resolved.");
     }
+
+    // TEMP: RET_CHECK-in-ImageToTensorCalculator crash investigation
+    // (2026-09-19). Video state at the exact moment of the call that's
+    // been throwing — compare a failing tick's values against a tick
+    // from earlier in the same session that worked.
+    console.info("[vision-debug] pre-detectForVideo(face)", {
+      videoWidth: video.videoWidth,
+      videoHeight: video.videoHeight,
+      readyState: video.readyState,
+      timestampMs,
+    });
 
     const faceResult = this.faceLandmarker.detectForVideo(video, timestampMs);
 
