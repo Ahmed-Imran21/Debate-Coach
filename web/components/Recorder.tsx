@@ -466,6 +466,14 @@ export default function Recorder(): ReactElement {
     );
   }
 
+  // The camera is live for exactly these phases. Outside them the
+  // stream is already stopped, so there is no frame loop left to
+  // protect and display:none is safe.
+  const cameraLive = phase === "setup" || phase === "recording";
+  // During setup the preview is the whole point (you can't act on
+  // "move closer" without it). During recording it's opt-in.
+  const previewVisible = phase === "setup" || capture.showPreview;
+
   return (
     <div className="recorder">
       {error && (
@@ -473,6 +481,70 @@ export default function Recorder(): ReactElement {
           {error}
         </p>
       )}
+
+      {/*
+        The ONE camera preview element for the whole recorder. It is
+        rendered unconditionally, outside every {phase === "..."}
+        block, and it must stay that way.
+
+        Two separate bugs (both 2026-09-18/19) came from this element
+        being rendered by phase-scoped parents, so that a phase change
+        swapped it for a different DOM node:
+
+          idle -> setup:      no <video> existed during setup at all,
+                              so capture.videoRef.current was null,
+                              acquireAndStartSetup()'s
+                              `if (videoRef.current) { srcObject = ... }`
+                              never ran, and loopStep()'s `!video`
+                              guard killed the loop before it started.
+          setup -> recording: SetupScreen's <video> unmounted and
+                              Recorder's mounted — a different node
+                              with no srcObject. The rVFC chain was
+                              anchored to the destroyed element, and
+                              loopStep() is only ever re-armed from
+                              inside its own callback, so the loop
+                              died silently. Zero frames were
+                              collected, endRecording() reported
+                              face_not_found, and the report said the
+                              user's face was never found.
+
+        srcObject is assigned exactly once, in acquireAndStartSetup().
+        Nothing reassigns it on a phase change. So if this element is
+        ever swapped for a different node mid-session, the camera feed
+        and the frame loop are both silently lost, with no error.
+
+        Equally important: never use `hidden` / display:none while
+        cameraLive is true. requestVideoFrameCallback only fires for
+        frames presented for composition, so a display:none video
+        stops the loop just as dead as unmounting it. Hide it with
+        opacity instead, which keeps it composited.
+
+        If you add a phase that needs the camera, add it to
+        cameraLive above — do not render a second <video> element.
+      */}
+      <video
+        ref={capture.videoRef}
+        muted
+        playsInline
+        autoPlay
+        style={{
+          display: cameraLive ? "block" : "none",
+          opacity: previewVisible ? 1 : 0,
+          // Out of flow when invisible so it leaves no layout gap,
+          // but still composited (unlike display:none) so rVFC keeps
+          // firing and the frame loop keeps running.
+          position: previewVisible ? "static" : "absolute",
+          pointerEvents: previewVisible ? "auto" : "none",
+          width: phase === "setup" ? "100%" : "8rem",
+          maxWidth: "34rem",
+          aspectRatio: "16 / 9",
+          objectFit: "cover",
+          transform: "scaleX(-1)",
+          borderRadius: "var(--radius)",
+          background: "var(--well)",
+          marginBottom: previewVisible ? "1.25rem" : 0,
+        }}
+      />
 
       {phase === "idle" && (
         <>
@@ -543,22 +615,9 @@ export default function Recorder(): ReactElement {
             </div>
           )}
 
-          <video
-            ref={capture.videoRef}
-            muted
-            playsInline
-            autoPlay
-            hidden={!usingVideoRef.current || !capture.showPreview}
-            style={{
-              width: "8rem",
-              aspectRatio: "16 / 9",
-              objectFit: "cover",
-              transform: "scaleX(-1)",
-              borderRadius: "var(--radius)",
-              background: "var(--well)",
-              marginBottom: "1rem",
-            }}
-          />
+          {/* The camera preview lives at the top of this component,
+              outside every phase block — see the comment there. It
+              must not be rendered here too. */}
 
           <button className="btn btn-stop" type="button" onClick={stopRecording}>
             Stop recording
