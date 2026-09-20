@@ -4,8 +4,13 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { type RawManifestModel, toModelProvenance } from "../extractor";
 import { TrackBuilder } from "../track";
 import { EMPTY_SAMPLE, FRAME_COLUMNS, type FrameSample } from "../types";
+
+// The real file the browser fetches, not a hand-typed stand-in —
+// see the "cross-language fixture" describe block below.
+import manifest from "../../../public/mediapipe/manifest.json";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -157,6 +162,16 @@ describe("TrackBuilder — gaps and degradations", () => {
 
 describe("TrackBuilder — cross-language fixture", () => {
   it("builds a realistic track and writes it for the backend contract test", () => {
+    // Confirmed bug (2026-09-19): source.models used to be built
+    // from manifest.json's entries verbatim, `path` field included.
+    // The backend's ModelInfo schema forbids unknown fields, so
+    // every real upload failed 422 while this exact fixture test —
+    // which had always hand-typed a bare {task, model_id, sha256}
+    // object instead of using the real manifest — kept passing.
+    // Routing through the real manifest.json and the real
+    // toModelProvenance() (extractor.ts) closes that gap: this test
+    // now fails if either one drifts out of sync with the backend's
+    // strict schema again.
     const b = new TrackBuilder();
 
     // Face present and roughly centered for the first second.
@@ -212,11 +227,11 @@ describe("TrackBuilder — cross-language fixture", () => {
         platform: "web",
         client_version: "test-fixture",
         user_agent_family: "chrome",
-        runtime: { name: "mediapipe-tasks-vision", version: "1.0.1", delegate: "GPU" },
-        models: [
-          { task: "face_landmarker", model_id: "face_landmarker.task", sha256: "a".repeat(64) },
-          { task: "hand_landmarker", model_id: "hand_landmarker.task", sha256: "b".repeat(64) },
-        ],
+        runtime: { name: "mediapipe-tasks-vision", version: manifest.runtime_version, delegate: "GPU" },
+        // JSON imports widen string literals (task: string, not the
+        // "face_landmarker" | "hand_landmarker" union) — asserted
+        // back, not loosened; the runtime values are the real ones.
+        models: toModelProvenance(manifest.models as RawManifestModel[]),
         device_tier: "full",
         benchmark_fps: 11.5,
       },
@@ -249,6 +264,13 @@ describe("TrackBuilder — cross-language fixture", () => {
     expect(track.frames.t).toHaveLength(13);
     expect(track.gaps).toHaveLength(1);
     expect(track.degradations).toHaveLength(1);
+    // manifest.json's real entries have 4 keys (task, model_id,
+    // sha256, path); the backend accepts exactly 3. Fails here,
+    // immediately, if toModelProvenance() (or the manifest shape)
+    // ever regresses — rather than 422ing on a real upload again.
+    for (const model of track.source.models) {
+      expect(Object.keys(model).sort()).toEqual(["model_id", "sha256", "task"]);
+    }
 
     const fixtureDir = join(__dirname, "__fixtures__");
     mkdirSync(fixtureDir, { recursive: true });
