@@ -1,4 +1,5 @@
 import json
+import logging
 
 from typing import Callable, Optional
 
@@ -6,6 +7,39 @@ from api.client import APIClient
 
 from .schemas import SpeechAnalysisResponse
 from .prompts import SYSTEM_PROMPT, build_analysis_prompt
+
+
+logger = logging.getLogger(__name__)
+
+
+class SpeechAnalysisValidationError(RuntimeError):
+    """
+    Raised when the LLM's response for speech analysis fails
+    schema validation. Carries the raw response text (always
+    valid JSON at this point — a JSONDecodeError is raised
+    separately, before this can happen) so a caller with access
+    to object storage can persist it as a failure artifact.
+
+    speech_analysis/ deliberately has no dependency on app/ or
+    any storage backend (see app/core/config.py's layering note,
+    and grep speech_analysis/audio/api/visual_analysis for "from
+    app" — there isn't one), so this class only carries data; it
+    does not attempt to persist itself. app/services/pipeline.py,
+    which already imports both this package and storage.py, does
+    that in its outer exception handler.
+
+    Confirmed bug (2026-09-20): the transcript that triggered the
+    validation error this class now preserves was gone by the time
+    anyone could look at it — never uploaded (the pipeline only
+    uploads artifacts after every stage succeeds), and deleted from
+    local disk by the pipeline's own `finally: shutil.rmtree(...)`
+    the moment the run failed. Diagnosing it required re-running
+    Whisper against the original audio from scratch.
+    """
+
+    def __init__(self, message: str, raw_response: str):
+        super().__init__(message)
+        self.raw_response = raw_response
 
 
 class LLMClient:
@@ -120,9 +154,28 @@ class LLMClient:
             )
 
         except Exception as exc:
-            raise RuntimeError(
+            # This is the only place the raw text is available at
+            # all — response.content is not stored anywhere, and
+            # data/exc are locals that vanish the moment this
+            # function returns. Logged at ERROR level regardless of
+            # whether the caller goes on to persist it (see
+            # SpeechAnalysisValidationError's docstring): app's own
+            # logging currently goes to the terminal only, not a
+            # file (logging.basicConfig in app/main.py has no
+            # FileHandler) — a real, separate gap, since this log
+            # line is otherwise exactly as unrecoverable as the
+            # working directory was.
+            logger.error(
+                "Speech analysis LLM response failed schema "
+                "validation for session %s: %s\nRaw response:\n%s",
+                session_id,
+                exc,
+                response.content,
+            )
+            raise SpeechAnalysisValidationError(
                 "LLM response failed speech-analysis "
-                "schema validation."
+                "schema validation.",
+                raw_response=response.content,
             ) from exc
 
         return parsed_response

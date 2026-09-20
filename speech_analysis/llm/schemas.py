@@ -81,41 +81,36 @@ class SemanticSegment(BaseModel):
 
     @field_validator("labels")
     @classmethod
-    def validate_labels(cls, value):
+    def validate_labels_present(cls, value):
+        """
+        Only checks the unit named at least one label. Whether
+        each individual label is one of VALID_LABELS is checked
+        later, per unit, in response_parser.anchor_units() —
+        dropping just the invented label (or the whole unit, if
+        none of its labels turn out valid) rather than rejecting
+        the entire LLM response over one bad word in one unit.
 
+        Confirmed bug (2026-09-20): this validator used to also
+        reject the whole response if ANY unit used a label outside
+        the fixed 11, e.g. "warrant" (a real, common term in
+        formal argumentation the model reached for unprompted on
+        substantive content) — unlike an unrecognized segment_id,
+        which was already tolerated at the anchor_units() level.
+        Every session past a trivial one-sentence transcript was at
+        risk of this. See anchor_units() for the actual filtering.
+        """
         if not value:
             raise ValueError(
                 "Every semantic segment must have at least one label."
             )
-
-        invalid_labels = [
-            label
-            for label in value
-            if label not in VALID_LABELS
-        ]
-
-        if invalid_labels:
-            raise ValueError(
-                f"Invalid labels: {invalid_labels}. "
-                f"Valid labels are: {sorted(VALID_LABELS)}"
-            )
-
         return value
 
-    @field_validator("fallacy_type")
-    @classmethod
-    def validate_fallacy_type(cls, value, info):
-
-        if value is not None:
-            labels = info.data.get("labels", [])
-
-            if "logical_fallacy" not in labels:
-                raise ValueError(
-                    "fallacy_type can only be provided when "
-                    "'logical_fallacy' is one of the labels."
-                )
-
-        return value
+    # No cross-field validator for fallacy_type here anymore. An
+    # inconsistent fallacy_type (present without "logical_fallacy"
+    # in labels — possible after invalid-label filtering above, too)
+    # is silently cleared to None in anchor_units(), same reasoning
+    # as labels: one inconsistent field on one unit shouldn't fail
+    # the whole response.
 
 
 # ---------------------------------------------------------

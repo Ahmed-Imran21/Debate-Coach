@@ -201,12 +201,63 @@ def test_type_mapping_precedence(transcription):
         assert out[0]["type"] == expected, labels
 
 
-def test_invalid_label_is_rejected(session_dir: Path):
+def test_invalid_label_is_dropped_from_an_otherwise_valid_unit(transcription):
+    """
+    Confirmed bug (2026-09-20): a label outside VALID_LABELS (e.g.
+    the model reaching for "warrant", a real argumentation term
+    this app's fixed 11-label taxonomy doesn't include) used to
+    fail the ENTIRE response via a Pydantic field_validator, not
+    just the one unit — unlike an unrecognized segment_id, which
+    anchor_units() already tolerated. This is exactly the gap that
+    let a real, non-trivial transcript fail in production
+    undetected until it happened.
+    """
+    out = _anchor(
+        [{"segment_ids": ["s_000"], "labels": ["claim", "warrant"]}],
+        transcription,
+    )
+    assert len(out) == 1
+    assert out[0]["labels"] == ["claim"]  # "warrant" dropped, "claim" kept
+
+
+def test_unit_whose_only_label_is_invalid_is_dropped_not_the_response(transcription):
+    out = _anchor(
+        [
+            {"segment_ids": ["s_000"], "labels": ["warrant"]},  # only label is invalid
+            {"segment_ids": ["s_001"], "labels": ["rebuttal"]},  # unaffected
+        ],
+        transcription,
+    )
+    assert [u["segment_ids"] for u in out] == [["s_001"]]
+
+
+def test_invalid_label_via_analyze_speech_end_to_end(session_dir: Path):
+    """Same as above two, through the real entry point: no longer raises."""
     units = [dict(GOOD_UNITS[0], labels=["not_a_label"])]
     client = FakeAPIClient(reply=_reply(units))
 
-    with pytest.raises(RuntimeError, match="schema validation"):
-        analyze_speech("s-test", session_dir, api_client=client)
+    _, content = analyze_speech("s-test", session_dir, api_client=client)
+
+    assert content.segments == []  # the unit's only label was invalid
+
+
+def test_fallacy_type_without_logical_fallacy_label_is_cleared_not_rejected(transcription):
+    """
+    Same class of problem as invalid labels, same fix shape: a
+    fallacy_type present without "logical_fallacy" among the
+    unit's labels used to reject the whole response (schemas.py's
+    old validate_fallacy_type). It's now silently cleared to None
+    for that unit instead — the unit itself is still meaningful
+    (it has a valid label), only the one inconsistent field is
+    wrong.
+    """
+    out = _anchor(
+        [{"segment_ids": ["s_000"], "labels": ["claim"], "fallacy_type": "straw_man"}],
+        transcription,
+    )
+    assert len(out) == 1
+    assert out[0]["labels"] == ["claim"]
+    assert out[0]["fallacy_type"] is None
 
 
 def test_unit_without_ids_is_rejected_by_schema(session_dir: Path):

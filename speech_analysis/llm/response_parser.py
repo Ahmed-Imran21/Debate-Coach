@@ -5,7 +5,7 @@ from ..models.speech_content import (
     SpeechSegment,
     unit_type_for,
 )
-from .schemas import SpeechAnalysisResponse
+from .schemas import VALID_LABELS, SpeechAnalysisResponse
 
 
 # ---------------------------------------------------------
@@ -21,6 +21,12 @@ def anchor_units(response, canonical: CanonicalTranscript):
       - a segment id already used by an earlier unit is dropped
         (a transcript segment belongs to at most one unit)
       - a unit left with no valid ids is dropped
+      - a label the model invented outside VALID_LABELS (e.g.
+        "warrant") is dropped from the unit's labels; a unit left
+        with no valid labels is dropped, same treatment as no
+        valid ids (see schemas.py's validate_labels_present)
+      - a fallacy_type present without "logical_fallacy" among the
+        unit's (post-filtering) labels is cleared to None
       - start = earliest start of its segments,
         end = latest end, text = their text joined in order
       - units are returned sorted by start, ids "au_000", ...
@@ -49,6 +55,19 @@ def anchor_units(response, canonical: CanonicalTranscript):
         if not ids:
             continue
 
+        labels = [
+            label
+            for label in unit.labels
+            if label in VALID_LABELS
+        ]
+
+        if not labels:
+            continue
+
+        fallacy_type = unit.fallacy_type
+        if fallacy_type is not None and "logical_fallacy" not in labels:
+            fallacy_type = None
+
         segs = sorted(
             (known[i] for i in ids),
             key=lambda s: s.start,
@@ -60,8 +79,8 @@ def anchor_units(response, canonical: CanonicalTranscript):
                 "start": segs[0].start,
                 "end": max(s.end for s in segs),
                 "text": " ".join(s.text for s in segs if s.text),
-                "labels": list(unit.labels),
-                "fallacy_type": unit.fallacy_type,
+                "labels": labels,
+                "fallacy_type": fallacy_type,
                 "summary": (unit.summary or "").strip() or None,
             }
         )
