@@ -1,6 +1,14 @@
 from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
+# Loose on purpose: api/ never imports app/services/key_usage.py
+# (or anything else in app/) directly — see that module's
+# record_usage() for the real signature this is meant to match.
+# app/services/engine.py is what actually wires the two together,
+# passing on_usage=record_usage when it constructs the one
+# process-wide APIClient.
+UsageHook = Callable[..., None]
+
 from .config import build_registry
 
 from .models import (
@@ -45,7 +53,23 @@ class APIClient:
     Both are process-wide and shared by all sessions.
     """
 
-    def __init__(self):
+    def __init__(self, on_usage: Optional[UsageHook] = None):
+        """
+        on_usage: optional hook invoked right alongside the
+        existing usage_tracker.record_*() calls in
+        _execute_request(), with (key_id, provider, ok=bool,
+        usage=<provider usage object or None>,
+        rate_limit_headers=<dict or None>). Does not affect key
+        selection, rotation, reservations, or rate limiting in
+        any way — those are entirely unchanged; this exists so a
+        caller with storage access (app/services/engine.py) can
+        persist usage without api/ needing to know storage
+        exists at all. Defaults to a no-op so every other caller
+        (tests, anything constructing APIClient directly) is
+        unaffected.
+        """
+
+        self._on_usage: UsageHook = on_usage or (lambda *a, **k: None)
 
         # =====================================================
         # LLM API INFRASTRUCTURE
@@ -426,6 +450,15 @@ class APIClient:
                 actual_tokens=actual_tokens,
             )
 
+            self._report_usage(
+                api_key,
+                ok=True,
+                usage=result.get("usage"),
+                rate_limit_headers=result.get(
+                    "rate_limit_headers"
+                ),
+            )
+
             return APIResponse(
                 request_id=(
                     request.request_id
@@ -461,6 +494,14 @@ class APIClient:
                     ),
                 )
 
+                # Still a real request against this key's
+                # provider-side budget even though it was
+                # rejected — no tokens to report, though.
+                self._report_usage(
+                    api_key,
+                    ok=False,
+                )
+
                 return APIResponse(
                     request_id=(
                         request.request_id
@@ -480,6 +521,11 @@ class APIClient:
                 reservation
             )
 
+            self._report_usage(
+                api_key,
+                ok=False,
+            )
+
             return APIResponse(
                 request_id=(
                     request.request_id
@@ -488,6 +534,35 @@ class APIClient:
                 success=False,
                 error=error_message,
             )
+
+    # =========================================================
+    # USAGE HOOK
+    # =========================================================
+
+    def _report_usage(
+        self,
+        api_key: APIKey,
+        ok: bool,
+        usage: Any = None,
+        rate_limit_headers: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """
+        Wraps self._on_usage in its own try/except: a bug in
+        whatever this is wired to (a dashboard counter) must
+        never be able to take down a real LLM call over it.
+        """
+
+        try:
+            self._on_usage(
+                api_key.id,
+                api_key.provider,
+                ok=ok,
+                usage=usage,
+                rate_limit_headers=rate_limit_headers,
+            )
+
+        except Exception:
+            pass
 
     # =========================================================
     # RATE LIMIT DETECTION
