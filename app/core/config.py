@@ -120,5 +120,30 @@ class Settings(BaseSettings):
             if origin.strip()
         ]
 
+    # ---------------------------------------------------------
+    # Admin
+    # ---------------------------------------------------------
+
+    # Comma-separated. Empty means nobody is an admin — the
+    # admin router 403s everyone rather than defaulting open.
+    # Compared case-insensitively (see admin_emails_list); users
+    # table emails are already stored lowercased at signup/login
+    # (app/routes/auth.py), but this list is typed by hand and
+    # shouldn't have to match that exactly.
+    admin_emails: str = ""
+
+    @property
+    def admin_emails_list(self) -> list[str]:
+        return [
+            email.strip().lower()
+            for email in self.admin_emails.split(",")
+            if email.strip()
+        ]
+
+    # Soft quota only — GCS itself has no capacity ceiling to
+    # enforce here. A number you set to know when to look, not a
+    # limit GCS applies. Default is arbitrary; change freely.
+    admin_storage_quota_gb: float = 50.0
+
 
 settings = Settings()

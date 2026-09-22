@@ -1,8 +1,9 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -22,12 +23,38 @@ from app.schemas.auth import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+ADMIN_SESSION_COOKIE = "dc_admin_session"
 
-def _tokens_for(user: User) -> TokenResponse:
-    return TokenResponse(
-        access_token=create_access_token(str(user.id)),
+
+def _tokens_for(user: User, response: Response) -> TokenResponse:
+    access_token = create_access_token(str(user.id))
+    tokens = TokenResponse(
+        access_token=access_token,
         refresh_token=create_refresh_token(str(user.id)),
     )
+
+    # Admin-only, additive: the real session still lives in
+    # localStorage exactly as before (every existing API call is
+    # unaffected). This cookie exists purely so web/middleware.ts
+    # can gate /admin server-side — middleware has no access to
+    # localStorage. Not set for non-admin users, so a non-admin
+    # session carries no extra cookie at all.
+    if user.email.lower() in settings.admin_emails_list:
+        response.set_cookie(
+            key=ADMIN_SESSION_COOKIE,
+            value=access_token,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            max_age=settings.access_token_expire_minutes * 60,
+            path="/",
+        )
+    else:
+        # Covers the case where ADMIN_EMAILS changes and a
+        # previously-admin user logs in again post-demotion.
+        response.delete_cookie(ADMIN_SESSION_COOKIE, path="/")
+
+    return tokens
 
 
 @router.post(
@@ -37,6 +64,7 @@ def _tokens_for(user: User) -> TokenResponse:
 )
 def signup(
     payload: SignupRequest,
+    response: Response,
     db: Session = Depends(get_db),
 ) -> TokenResponse:
 
@@ -65,12 +93,13 @@ def signup(
     db.commit()
     db.refresh(user)
 
-    return _tokens_for(user)
+    return _tokens_for(user, response)
 
 
 @router.post("/login", response_model=TokenResponse)
 def login(
     payload: LoginRequest,
+    response: Response,
     db: Session = Depends(get_db),
 ) -> TokenResponse:
 
@@ -91,12 +120,13 @@ def login(
             detail="Incorrect email or password.",
         )
 
-    return _tokens_for(user)
+    return _tokens_for(user, response)
 
 
 @router.post("/refresh", response_model=TokenResponse)
 def refresh(
     payload: RefreshRequest,
+    response: Response,
     db: Session = Depends(get_db),
 ) -> TokenResponse:
 
@@ -135,4 +165,4 @@ def refresh(
             detail="User not found",
         )
 
-    return _tokens_for(user)
+    return _tokens_for(user, response)
