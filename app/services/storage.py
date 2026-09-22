@@ -246,3 +246,29 @@ def delete_prefix(prefix: str) -> int:
     _bucket.delete_blobs(blobs)
 
     return len(blobs)
+
+
+# ============================================================
+# USAGE (admin dashboard)
+# ============================================================
+
+def total_bytes_used() -> int:
+    """
+    Sum of every object's size across the whole bucket, via a
+    plain list_blobs — GCS's bucket resource itself carries no
+    running total, and Cloud Monitoring's storage-size metric
+    (the alternative) updates roughly once a day, which is too
+    stale for a dashboard meant to answer "right now". A listing
+    call is the accurate number; on a bucket large enough for
+    this to be slow, that's an argument for a scheduled
+    Monitoring-metric cache, not for this function to lie faster.
+    size is None only for a very small class of storage classes
+    this bucket doesn't use (see google-cloud-storage's Blob
+    docs); treated as 0 rather than raising, since one blob's
+    unusual state shouldn't fail the whole dashboard.
+    """
+
+    return sum(
+        (blob.size or 0)
+        for blob in _client.list_blobs(_bucket)
+    )
