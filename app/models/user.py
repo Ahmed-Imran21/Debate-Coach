@@ -45,6 +45,15 @@ class User(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
+    # Nullable: never set until this user's next authenticated
+    # request after the column exists. Touched by the last-seen
+    # middleware on every authenticated call and by POST /heartbeat
+    # (admin dashboard's "active now" — see migrations/0001_admin_dashboard.sql).
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     # passive_deletes lets the database's ON DELETE CASCADE do
     # the work instead of SQLAlchemy loading every session row
     # into memory first.
