@@ -447,3 +447,40 @@ export const VIDEO_UNAVAILABLE_REASON_LABEL: Record<string, string> = {
   face_not_found: "Your face couldn't be found during setup.",
   duration_mismatch: "The captured visual data didn't match the length of the recording.",
 };
+
+/* ---------------------------------------------------------- */
+/* Admin (app/schemas/admin.py)                                */
+/* ---------------------------------------------------------- */
+
+export interface KeyUsage {
+  key_id: string;
+  label: string;
+  provider: string;
+
+  requests_used: number;
+  requests_limit: number;
+  requests_remaining: number;
+
+  prompt_tokens: number;
+  completion_tokens: number;
+  tokens_used: number;
+  tokens_limit: number;
+  tokens_remaining: number;
+
+  window_reset_at: string | null;
+  last_rate_limit_headers: Record<string, string> | null;
+}
+
+export interface StorageUsage {
+  used_bytes: number;
+  used_gb: number;
+  quota_gb: number;
+  remaining_gb: number;
+}
+
+export interface AdminStats {
+  active_users: number;
+  total_signups: number;
+  keys: KeyUsage[];
+  storage: StorageUsage;
+}
