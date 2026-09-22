@@ -4,6 +4,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.security import decode_token
 from app.db.database import get_db
 from app.models.user import User
@@ -60,3 +61,29 @@ def get_current_user(
         )
 
     return user
+
+
+def require_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """
+    Every route in app/routes/admin.py depends on this, not on
+    get_current_user directly — a signed-in, non-admin user must
+    always get a 403 here, never reach the route body. The
+    frontend's own /admin gate (web/middleware.ts) checks the
+    same ADMIN_EMAILS list server-side before rendering anything,
+    but that is UX, not the security boundary: this dependency is.
+
+    Email, not a role column, on purpose — there is exactly one
+    admin (the person running this env), controlled entirely by
+    an env var so adding/removing an admin is a config change,
+    not a migration or a deploy.
+    """
+
+    if current_user.email.lower() not in settings.admin_emails_list:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized.",
+        )
+
+    return current_user
