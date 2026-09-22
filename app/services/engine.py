@@ -20,6 +20,8 @@ from typing import Optional
 
 from api.client import APIClient
 
+from app.services.key_usage import record_usage
+
 
 _api_client: Optional[APIClient] = None
 
@@ -35,7 +37,10 @@ def start() -> APIClient:
     if _api_client is not None:
         return _api_client
 
-    _api_client = APIClient()
+    # on_usage=record_usage is the only place api/'s key-dispatch
+    # path and app/'s storage layer connect — see
+    # app/services/key_usage.py and api/client.py's UsageHook.
+    _api_client = APIClient(on_usage=record_usage)
 
     return _api_client
 
