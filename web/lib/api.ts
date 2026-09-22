@@ -1,4 +1,5 @@
 import type {
+  AdminStats,
   SessionCreated,
   SessionReport,
   SessionSummary,
@@ -196,6 +197,27 @@ export async function login(input: {
 
 export function getCurrentUser(): Promise<User> {
   return request<User>("/v1/users/me");
+}
+
+/**
+ * Fallback for LastSeenMiddleware (app/core/last_seen.py), which
+ * only fires on requests that hit some other endpoint. Called on
+ * an interval while a signed-in tab is open — see
+ * components/Heartbeat.tsx — so a tab idling on a page that
+ * makes no other API calls still counts as active. Errors are
+ * swallowed by the caller; a missed heartbeat isn't worth
+ * surfacing to the user.
+ */
+export function heartbeat(): Promise<void> {
+  return request<void>("/v1/users/heartbeat", { method: "POST" });
+}
+
+/* ---------------------------------------------------------- */
+/* Admin                                                        */
+/* ---------------------------------------------------------- */
+
+export function getAdminStats(): Promise<AdminStats> {
+  return request<AdminStats>("/v1/admin/stats");
 }
 
 /* ---------------------------------------------------------- */
