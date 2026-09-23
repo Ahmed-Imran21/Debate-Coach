@@ -1,5 +1,6 @@
 import type {
   AdminStats,
+  AdminWhoAmI,
   SessionCreated,
   SessionReport,
   SessionSummary,
@@ -86,6 +87,15 @@ async function refreshTokens(): Promise<boolean> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refresh_token: refresh }),
+    // localhost:3000 and the API origin are different ports, so
+    // different origins — without this, the browser silently
+    // discards this response's Set-Cookie (app/routes/auth.py's
+    // admin-only dc_admin_session), same reasoning as login/signup
+    // below. Needed here too: an admin session left open past the
+    // access token's expiry refreshes through this path, and
+    // without a fresh Set-Cookie each time, the admin cookie would
+    // just expire on its own original schedule and never renew.
+    credentials: "include",
   });
 
   if (!response.ok) {
@@ -110,6 +120,16 @@ interface RequestOptions {
   headers?: Record<string, string>;
   auth?: boolean;
   retryOnAuthFailure?: boolean;
+  /**
+   * "include" only where the response can carry a cross-origin
+   * Set-Cookie the browser actually needs to keep — today that's
+   * just signup/login (dc_admin_session, admin-only; see
+   * app/routes/auth.py). Left unset (browser default
+   * "same-origin") everywhere else: no other endpoint sets or
+   * reads that cookie, so there's nothing for other calls to gain
+   * from sending/receiving credentials cross-origin.
+   */
+  credentials?: RequestCredentials;
 }
 
 async function request<T>(
@@ -123,6 +143,7 @@ async function request<T>(
     headers: extraHeaders,
     auth = true,
     retryOnAuthFailure = true,
+    credentials,
   } = options;
 
   const headers: Record<string, string> = { ...extraHeaders };
@@ -140,6 +161,7 @@ async function request<T>(
     method,
     headers,
     body: rawBody !== undefined ? rawBody : body === undefined ? undefined : JSON.stringify(body),
+    ...(credentials ? { credentials } : {}),
   });
 
   // An expired access token is the common case, not an error.
@@ -175,6 +197,7 @@ export async function signup(input: {
     method: "POST",
     body: input,
     auth: false,
+    credentials: "include",
   });
 
   storeTokens(tokens);
@@ -189,6 +212,7 @@ export async function login(input: {
     method: "POST",
     body: input,
     auth: false,
+    credentials: "include",
   });
 
   storeTokens(tokens);
@@ -218,6 +242,47 @@ export function heartbeat(): Promise<void> {
 
 export function getAdminStats(): Promise<AdminStats> {
   return request<AdminStats>("/v1/admin/stats");
+}
+
+let adminCheckToken: string | null = null;
+let adminCheckPromise: Promise<boolean> | null = null;
+
+/**
+ * Whether the signed-in user is an admin, for the SiteHeader link
+ * only — never trust this for anything that actually needs
+ * protecting; every real /admin/* route still enforces
+ * require_admin server-side regardless of what this returns.
+ *
+ * Memoized per access token, not per call site: SiteHeader
+ * re-mounts on every page (it's rendered per-page, not once in
+ * the root layout), so without this a signed-in visitor would
+ * hit GET /v1/admin/whoami on every navigation. The token itself
+ * is the cache key, so a token refresh or a different user
+ * signing in the same tab correctly triggers one fresh check,
+ * not a stale cached answer for the wrong account. Resolves to
+ * false (never throws) for a signed-out visitor, a non-admin
+ * (403), or any network failure — SiteHeader has one thing to
+ * do with the result either way: not render the link.
+ */
+export function isCurrentUserAdmin(): Promise<boolean> {
+  const token = getAccessToken();
+
+  if (!token) {
+    adminCheckToken = null;
+    adminCheckPromise = null;
+    return Promise.resolve(false);
+  }
+
+  if (adminCheckPromise && adminCheckToken === token) {
+    return adminCheckPromise;
+  }
+
+  adminCheckToken = token;
+  adminCheckPromise = request<AdminWhoAmI>("/v1/admin/whoami")
+    .then(() => true)
+    .catch(() => false);
+
+  return adminCheckPromise;
 }
 
 /* ---------------------------------------------------------- */
