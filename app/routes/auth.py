@@ -39,13 +39,31 @@ def _tokens_for(user: User, response: Response) -> TokenResponse:
     # can gate /admin server-side — middleware has no access to
     # localStorage. Not set for non-admin users, so a non-admin
     # session carries no extra cookie at all.
+    #
+    # samesite="none" (not "lax"): production puts the frontend
+    # (Vercel) and this backend (Cloud Run) on genuinely different
+    # domains, not just different ports the way local dev is —
+    # "lax" gets silently dropped across a real cross-site set,
+    # the same failure mode as the missing credentials: "include"
+    # this cookie needed on the frontend fetch (see lib/api.ts).
+    # Unconditional rather than environment-branched: "none" is
+    # strictly less restrictive than "lax" (sent everywhere "lax"
+    # would send it, plus cross-site), so it already worked over
+    # plain http://localhost in local testing and needs no
+    # environment detection. Requires secure=True, already set.
+    # Safe to loosen here specifically because nothing server-side
+    # ever reads this cookie from the request — it's httpOnly and
+    # consumed only by middleware.ts, which reads it off the
+    # incoming same-origin browser request and re-sends it itself
+    # as a Bearer header; there's no request-forgery surface to
+    # protect against by keeping it site-restricted.
     if user.email.lower() in settings.admin_emails_list:
         response.set_cookie(
             key=ADMIN_SESSION_COOKIE,
             value=access_token,
             httponly=True,
             secure=True,
-            samesite="lax",
+            samesite="none",
             max_age=settings.access_token_expire_minutes * 60,
             path="/",
         )
