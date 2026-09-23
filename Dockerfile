@@ -39,6 +39,9 @@ COPY audio/ ./audio/
 COPY raw_metrics/ ./raw_metrics/
 COPY speech_analysis/ ./speech_analysis/
 COPY coaching_engine/ ./coaching_engine/
+COPY session_timeline/ ./session_timeline/
+COPY visual_analysis/ ./visual_analysis/
+COPY visual_coaching/ ./visual_coaching/
 COPY app/ ./app/
 
 RUN useradd --create-home --uid 10001 appuser \
