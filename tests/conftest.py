@@ -22,6 +22,10 @@ os.environ.setdefault("GCP_STORAGE_BUCKET", "test-bucket")
 # tests bind the ORM to their own SQLite engine instead.
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://test:test@127.0.0.1:1/never")
 os.environ.setdefault("VIDEO_ANALYSIS_ENABLED", "true")
+# The per-client HTTP limiter is in-process and every TestClient
+# request shares one client address, so route tests across files
+# would otherwise 429 each other once the suite passes ~60 calls.
+os.environ.setdefault("REQUEST_RATE_LIMIT_PER_MINUTE", "100000")
 
 
 def _word(text: str, start: float, end: float) -> dict:
