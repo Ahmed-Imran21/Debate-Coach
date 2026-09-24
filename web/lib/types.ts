@@ -484,8 +484,3 @@ export interface AdminStats {
   keys: KeyUsage[];
   storage: StorageUsage;
 }
-
-export interface AdminWhoAmI {
-  email: string;
-  is_admin: boolean;
-}
