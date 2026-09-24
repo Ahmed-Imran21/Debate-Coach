@@ -387,6 +387,22 @@ code {
   color: var(--ink-soft);
 }
 
+.confirm-dialog {
+  border: none;
+  border-radius: var(--radius);
+  padding: 0;
+  background: transparent;
+  max-width: calc(100vw - 2 * var(--gutter));
+}
+
+.confirm-dialog::backdrop {
+  background: rgba(26, 31, 28, 0.55);
+}
+
+.confirm-dialog .form-panel {
+  margin: 0;
+}
+
 /* ------------------------------------------------------------
    Two-column split
    ------------------------------------------------------------ */

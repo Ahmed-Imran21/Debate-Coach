@@ -10,17 +10,24 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
+// Set by redirectToLoginAfterSessionExpiry (lib/api.ts, "expired")
+// and DeleteAccountModal (lib/api.ts's clearTokens + this page's
+// own "deleted" reason) after a real backend response, never
+// optimistically. Shown instead of raw backend response text
+// ("Invalid refresh token" etc.), which describes what the server
+// saw, not what the person should do about it.
+const REASON_MESSAGE: Record<string, string> = {
+  expired: "Your session expired. Please log in again.",
+  deleted: "Your account has been deleted.",
+};
+
 export default async function LoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ reason?: string }>;
 }): Promise<ReactElement> {
-  // Set by redirectToLoginAfterSessionExpiry (lib/api.ts) whenever
-  // an authenticated page's request gets a 401 and the automatic
-  // token refresh also fails. Shown instead of the backend's own
-  // response text ("Invalid refresh token" etc.), which describes
-  // what the server saw, not what the person should do about it.
-  const expired = (await searchParams).reason === "expired";
+  const { reason } = await searchParams;
+  const message = reason ? REASON_MESSAGE[reason] : undefined;
 
   return (
     <div className="shell">
@@ -29,13 +36,13 @@ export default async function LoginPage({
         <section className="block">
           <div className="wrap">
             <h1 style={{ marginBottom: "1.5rem" }}>Sign in</h1>
-            {expired && (
+            {message && (
               <p
                 className="alert alert-quiet"
                 role="status"
                 style={{ marginBottom: "1.5rem" }}
               >
-                Your session expired. Please log in again.
+                {message}
               </p>
             )}
             <AuthForm mode="login" />
