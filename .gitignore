@@ -1,6 +1,10 @@
 sessions/*
 !sessions/.gitkeep
 
+# node_modules is also covered by web/.gitignore (scoped to web/);
+# this covers the root too, in case anything ever installs there.
+node_modules/
+
 # ==========================================
 # Python
 # ==========================================
