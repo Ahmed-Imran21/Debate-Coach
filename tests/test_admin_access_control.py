@@ -42,7 +42,7 @@ def test_empty_admin_emails_rejects_everyone(monkeypatch):
     with pytest.raises(HTTPException) as exc_info:
         require_admin(current_user=_FakeUser(email="anyone@example.com"))
 
-    assert exc_info.value.status_code == 403
+    assert exc_info.value.status_code == 404
 
 
 def test_listed_email_is_admitted(monkeypatch):
@@ -58,7 +58,7 @@ def test_unlisted_email_is_rejected(monkeypatch):
     with pytest.raises(HTTPException) as exc_info:
         require_admin(current_user=_FakeUser(email="someone-else@example.com"))
 
-    assert exc_info.value.status_code == 403
+    assert exc_info.value.status_code == 404
 
 
 def test_comparison_is_case_insensitive(monkeypatch):
@@ -84,3 +84,13 @@ def test_whitespace_and_empty_entries_are_ignored(monkeypatch):
 
     assert require_admin(current_user=_FakeUser(email="admin@example.com"))
     assert settings.admin_emails_list == ["admin@example.com"]
+
+
+def test_no_user_at_all_is_rejected(monkeypatch):
+    """No token, or a bad/expired one: _optional_user resolves to None."""
+    monkeypatch.setattr(settings, "admin_emails", "owner@example.com")
+
+    with pytest.raises(HTTPException) as exc_info:
+        require_admin(current_user=None)
+
+    assert exc_info.value.status_code == 404
