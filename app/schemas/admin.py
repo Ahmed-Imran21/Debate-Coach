@@ -64,3 +64,9 @@ class AdminUserPageOut(BaseModel):
     users: list[AdminUserOut]
     # Opaque; pass back as ?cursor= for the next page. Null on the last.
     next_cursor: str | None
+
+
+class AdminDeleteUserRequest(BaseModel):
+    # The calling admin's own password, re-checked before anything
+    # else happens — not the target's, which the admin doesn't have.
+    password: str

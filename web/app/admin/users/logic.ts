@@ -61,9 +61,18 @@ export function canConfirmDelete(typed: string, email: string): boolean {
   return typed.trim() === email;
 }
 
-/** Exactly what the modal's delete button's `disabled` is derived from. */
-export function deleteButtonEnabled(typed: string, email: string | undefined, busy: boolean): boolean {
-  return email !== undefined && !busy && canConfirmDelete(typed, email);
+/**
+ * Exactly what the modal's delete button's `disabled` is derived from:
+ * the target's exact email AND the admin's own password, never while a
+ * delete is already in flight.
+ */
+export function deleteButtonEnabled(
+  typed: string,
+  email: string | undefined,
+  password: string,
+  busy: boolean,
+): boolean {
+  return email !== undefined && !busy && password.length > 0 && canConfirmDelete(typed, email);
 }
 
 /* ---------------------------------------------------------- */

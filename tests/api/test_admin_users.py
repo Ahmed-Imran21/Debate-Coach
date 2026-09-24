@@ -12,6 +12,7 @@ import pytest
 
 BASE = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
 ADMIN_EMAIL = "boss@test.com"
+ADMIN_PASSWORD = "AdminPass123"
 
 
 @pytest.fixture
@@ -56,9 +57,18 @@ def add_user(db):
 
 
 @pytest.fixture
-def admin(add_user):
+def admin(db, add_user):
+    from app.core.security import hash_password
+
     # Oldest of all, so it sorts last and never disturbs expectations.
-    return add_user(ADMIN_EMAIL, created_at=BASE - timedelta(days=365))
+    user = add_user(ADMIN_EMAIL, created_at=BASE - timedelta(days=365))
+    user.password_hash = hash_password(ADMIN_PASSWORD)
+    db.commit()
+    return user
+
+
+def _force_delete(client, headers, user_id, password=ADMIN_PASSWORD):
+    return client.request("DELETE", f"/v1/admin/users/{user_id}", json={"password": password}, headers=headers)
 
 
 def _add_session(db, user):
@@ -288,7 +298,7 @@ def test_force_delete_removes_exactly_that_user_and_everything_it_owns(api, db, 
     target_id, bystander_id = target.id, bystander.id
     bystander_blobs = {k: v for k, v in fake_storage.blobs.items() if k.startswith(f"users/{bystander_id}/")}
 
-    r = client.delete(f"/v1/admin/users/{target_id}", headers=bearer(admin))
+    r = _force_delete(client, bearer(admin), target_id)
 
     assert r.status_code == 204, r.text
     assert fake_storage.deleted_prefixes == [f"users/{target_id}/"]
@@ -308,7 +318,7 @@ def test_force_delete_removes_exactly_that_user_and_everything_it_owns(api, db, 
 
 def test_force_delete_of_nonexistent_user_is_404(api, admin, fake_storage):
     client, bearer = api
-    r = client.delete(f"/v1/admin/users/{uuid.uuid4()}", headers=bearer(admin))
+    r = _force_delete(client, bearer(admin), uuid.uuid4())
     assert r.status_code == 404
     assert r.json() == {"detail": "Not Found"}
     assert fake_storage.deleted_prefixes == []
@@ -318,7 +328,7 @@ def test_admin_cannot_force_delete_themselves(api, db, admin, fake_storage):
     from app.models.user import User
 
     client, bearer = api
-    r = client.delete(f"/v1/admin/users/{admin.id}", headers=bearer(admin))
+    r = _force_delete(client, bearer(admin), admin.id)
     assert r.status_code == 409
     assert "your own account" in r.json()["detail"]
     assert fake_storage.deleted_prefixes == []
@@ -334,7 +344,7 @@ def test_admin_cannot_force_delete_another_admin(api, db, admin, add_user, fake_
     other = add_user("other.admin@test.com")
     client, bearer = api
 
-    r = client.delete(f"/v1/admin/users/{other.id}", headers=bearer(admin))
+    r = _force_delete(client, bearer(admin), other.id)
 
     assert r.status_code == 409
     assert "ADMIN_EMAILS" in r.json()["detail"]
@@ -351,7 +361,7 @@ def test_force_delete_refused_while_an_analysis_is_running(api, db, admin, two_u
     target, _, sessions = two_users_with_data
     monkeypatch.setattr(jobs, "is_running", lambda sid: sid == sessions[target.id])
 
-    r = client.delete(f"/v1/admin/users/{target.id}", headers=bearer(admin))
+    r = _force_delete(client, bearer(admin), target.id)
 
     assert r.status_code == 409
     assert fake_storage.deleted_prefixes == []
@@ -385,10 +395,115 @@ def test_non_admin_cannot_force_delete(api, db, add_user, two_users_with_data, f
     client, bearer = api
     target, bystander, _ = two_users_with_data
 
-    real = client.delete(f"/v1/admin/users/{target.id}", headers=bearer(bystander))
-    fake = client.delete(f"/v1/definitely-not-a-route/{target.id}", headers=bearer(bystander))
+    real = client.request("DELETE", f"/v1/admin/users/{target.id}", json={"password": "x"}, headers=bearer(bystander))
+    fake = client.request("DELETE", f"/v1/definitely-not-a-route/{target.id}", json={"password": "x"}, headers=bearer(bystander))
 
     assert (real.status_code, real.content) == (fake.status_code, fake.content) == (404, b'{"detail":"Not Found"}')
     assert fake_storage.deleted_prefixes == []
     db.expire_all()
     assert db.get(User, target.id) is not None
+
+
+# ---------------------------------------------------------------
+# Admin password re-authentication
+# ---------------------------------------------------------------
+
+def test_wrong_admin_password_is_rejected_and_touches_nothing(api, db, admin, two_users_with_data, fake_storage):
+    from app.models.session import DebateSession
+    from app.models.user import User
+
+    client, bearer = api
+    target, bystander, sessions = two_users_with_data
+    blobs_before = dict(fake_storage.blobs)
+
+    r = _force_delete(client, bearer(admin), target.id, password="not-the-password")
+
+    assert r.status_code == 401
+    assert r.json() == {"detail": "Incorrect password."}
+    assert fake_storage.deleted_prefixes == []
+    assert fake_storage.blobs == blobs_before
+    db.expire_all()
+    assert db.get(User, target.id) is not None
+    assert db.get(DebateSession, sessions[target.id]) is not None
+
+
+def test_the_targets_own_password_is_not_accepted(api, db, admin, add_user, fake_storage):
+    """It's the admin's password being checked, never the target's."""
+    from app.core.security import hash_password
+    from app.models.user import User
+
+    client, bearer = api
+    target = add_user("victim@test.com")
+    target.password_hash = hash_password("VictimPass999")
+    db.commit()
+
+    r = _force_delete(client, bearer(admin), target.id, password="VictimPass999")
+
+    assert r.status_code == 401
+    db.expire_all()
+    assert db.get(User, target.id) is not None
+    assert fake_storage.deleted_prefixes == []
+
+
+def test_correct_admin_password_proceeds(api, db, admin, add_user, fake_storage):
+    from app.models.user import User
+
+    client, bearer = api
+    target = add_user("goner@test.com")
+
+    r = _force_delete(client, bearer(admin), target.id)
+
+    assert r.status_code == 204
+    db.expire_all()
+    assert db.get(User, target.id) is None
+
+
+@pytest.mark.parametrize("case", ["nonexistent", "self", "other admin", "running analysis"])
+def test_password_is_checked_before_every_other_outcome(api, db, admin, add_user, two_users_with_data, fake_storage, monkeypatch, case):
+    """Without the password nothing leaks: 401, never the 404 or 409 that
+    would say whether an id exists, is an admin, or is mid-analysis."""
+    from app.core.config import settings
+    from app.services import jobs
+
+    client, bearer = api
+    target, _, sessions = two_users_with_data
+    if case == "nonexistent":
+        user_id = uuid.uuid4()
+    elif case == "self":
+        user_id = admin.id
+    elif case == "other admin":
+        monkeypatch.setattr(settings, "admin_emails", f"{ADMIN_EMAIL},{target.email}")
+        user_id = target.id
+    else:
+        monkeypatch.setattr(jobs, "is_running", lambda sid: sid == sessions[target.id])
+        user_id = target.id
+
+    r = _force_delete(client, bearer(admin), user_id, password="wrong")
+
+    assert (r.status_code, r.json()) == (401, {"detail": "Incorrect password."}), case
+    assert fake_storage.deleted_prefixes == []
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"json": {}},
+        {"json": {"password": 123}},
+        {"content": b"{not json", "headers": {"content-type": "application/json"}},
+    ],
+)
+def test_missing_or_malformed_body_is_a_422_for_an_admin_and_touches_nothing(api, db, admin, add_user, fake_storage, kwargs):
+    from app.models.user import User
+
+    client, bearer = api
+    target = add_user("kept@test.com")
+    headers = {**bearer(admin), **kwargs.pop("headers", {})}
+
+    r = client.request("DELETE", f"/v1/admin/users/{target.id}", headers=headers, **kwargs)
+
+    assert r.status_code == 422
+    assert "input" not in r.text  # the app-wide handler strips echoed values
+    db.expire_all()
+    assert db.get(User, target.id) is not None
+    assert fake_storage.deleted_prefixes == []
