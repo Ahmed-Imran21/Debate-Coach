@@ -2,15 +2,19 @@ import uuid
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.security import verify_password
 from app.db.database import get_db
 from app.models.user import User
 from app.routes.deps import require_admin
 from app.schemas.admin import (
+    AdminDeleteUserRequest,
     AdminStatsOut,
     AdminUserOut,
     AdminUserPageOut,
@@ -122,17 +126,52 @@ def list_users(
     )
 
 
-@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def _delete_request_password(
+    request: Request,
+    _admin: User = Depends(require_admin),
+) -> str:
+    """
+    The delete's body, read only after require_admin has passed.
+    Declaring it as a normal body parameter would let FastAPI parse
+    it first — before any dependency runs — so a non-admin sending
+    malformed JSON would get a 422 where a nonexistent path gives a
+    404, revealing the route. (DELETE /v1/users/me does exactly that,
+    harmlessly: it isn't a hidden route.)
+    """
+    try:
+        return AdminDeleteUserRequest.model_validate_json(await request.body()).password
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors(include_url=False)) from None
+
+
+@router.delete(
+    "/users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {"application/json": {"schema": AdminDeleteUserRequest.model_json_schema()}},
+        }
+    },
+)
 def delete_user(
     user_id: uuid.UUID,
     admin: User = Depends(require_admin),
+    password: str = Depends(_delete_request_password),
     db: Session = Depends(get_db),
 ) -> None:
     """
     Force-delete another user's account and everything it owns,
     through the same delete_user_account() as the self-service delete.
-    The caller's admin session is the authorization; no password from
-    the target user.
+
+    Re-authenticates with the calling admin's own password (never the
+    target's), first — before the target is even looked up. Every
+    later step says something: 404 that the id doesn't exist, 409 that
+    it's the caller, an admin, or mid-analysis. Without the password
+    this answers 401 and nothing else, whatever the target, so a
+    stolen admin session alone can neither delete anyone nor learn
+    anything here. Same order as DELETE /v1/users/me: password, then
+    everything else.
 
     Refused, with 409, for:
     - the calling admin's own account: self-deletion goes through
@@ -144,6 +183,12 @@ def delete_user(
       from ADMIN_EMAILS is the step that actually demotes someone;
       after that their account is an ordinary one this route deletes.
     """
+
+    if not verify_password(password, admin.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect password.",
+        )
 
     target = db.get(User, user_id)
 

@@ -87,6 +87,34 @@ def test_user_management_routes_match_an_unknown_path_for_non_admins(api, make_u
         assert real.status_code == 404
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"json": {"password": "guess"}},
+        {"json": {}},
+        {"content": b"{not json", "headers": {"content-type": "application/json"}},
+        {"content": b"password=x", "headers": {"content-type": "application/x-www-form-urlencoded"}},
+    ],
+)
+def test_force_delete_body_never_reveals_the_route_to_non_admins(api, make_user, body):
+    """
+    The delete takes a password body. FastAPI parses a declared body
+    before any dependency runs, so malformed JSON would 422 ahead of
+    require_admin's 404; the route reads its body only after the admin
+    check instead. Every body shape must look like a nonexistent path.
+    """
+    client, bearer = api
+    target = "00000000-0000-0000-0000-000000000000"
+    for auth in ({}, {"Authorization": "Bearer not-a-jwt"}, bearer(make_user("someone@test.com"))):
+        kwargs = dict(body)
+        headers = {**auth, **kwargs.pop("headers", {})}
+        real = client.request("DELETE", f"/v1/admin/users/{target}", headers=headers, **kwargs)
+        fake = client.request("DELETE", f"{UNKNOWN_PATH}/{target}", headers=headers, **kwargs)
+        assert _fingerprint(real) == _fingerprint(fake), (body, auth)
+        assert real.status_code == 404
+
+
 def test_admin_still_gets_through(api, make_user):
     client, bearer = api
 

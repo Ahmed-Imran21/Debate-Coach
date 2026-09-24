@@ -26,6 +26,14 @@ export function listUsers(params: ListUsersParams = {}): Promise<AdminUserPage> 
   return request<AdminUserPage>(`/v1/admin/users${qs ? `?${qs}` : ""}`);
 }
 
-export function deleteUser(id: string): Promise<void> {
-  return request<void>(`/v1/admin/users/${encodeURIComponent(id)}`, { method: "DELETE" });
+/**
+ * `password` is the signed-in admin's own, re-checked by the backend
+ * before anything else. Throws ApiError(401, "Incorrect password.")
+ * when it's wrong.
+ */
+export function deleteUser(id: string, password: string): Promise<void> {
+  return request<void>(`/v1/admin/users/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    body: { password },
+  });
 }

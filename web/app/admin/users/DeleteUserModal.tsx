@@ -7,7 +7,7 @@ import { ApiError, redirectToLoginAfterSessionExpiry } from "@/lib/api";
 import type { AdminUser } from "@/lib/types";
 
 import { deleteUser } from "../admin-api";
-import { canConfirmDelete, deleteButtonEnabled } from "./logic";
+import { deleteButtonEnabled } from "./logic";
 
 interface Props {
   /** The user to delete; the dialog is open while this is set. */
@@ -18,11 +18,11 @@ interface Props {
 }
 
 /**
- * Same shape as components/DeleteAccountModal.tsx, but the typed
- * confirmation is the target's exact email, and there's no password:
- * the admin's own session is the authorization, checked server-side
- * (DELETE /v1/admin/users/{id}). Nothing here reports success before
- * that call has returned.
+ * Same shape as components/DeleteAccountModal.tsx: the typed
+ * confirmation is the target's exact email, and the password is the
+ * signed-in admin's own, which the backend re-checks before anything
+ * else (DELETE /v1/admin/users/{id}). Nothing here reports success
+ * before that call has returned.
  */
 export default function DeleteUserModal({ user, onClose, onDeleted }: Props): ReactElement {
   const router = useRouter();
@@ -32,6 +32,7 @@ export default function DeleteUserModal({ user, onClose, onDeleted }: Props): Re
   const inFlight = useRef(false);
 
   const [typed, setTyped] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -40,6 +41,7 @@ export default function DeleteUserModal({ user, onClose, onDeleted }: Props): Re
     if (!dialog) return;
     if (user && !dialog.open) {
       setTyped("");
+      setPassword("");
       setError(null);
       dialog.showModal();
     } else if (!user && dialog.open) {
@@ -54,14 +56,14 @@ export default function DeleteUserModal({ user, onClose, onDeleted }: Props): Re
 
   async function handleSubmit(event: FormEvent): Promise<void> {
     event.preventDefault();
-    if (!user || inFlight.current || !canConfirmDelete(typed, user.email)) return;
+    if (!user || inFlight.current || !deleteButtonEnabled(typed, user.email, password, false)) return;
 
     inFlight.current = true;
     setBusy(true);
     setError(null);
 
     try {
-      await deleteUser(user.id);
+      await deleteUser(user.id, password);
       inFlight.current = false;
       setBusy(false);
       onDeleted(user);
@@ -71,6 +73,12 @@ export default function DeleteUserModal({ user, onClose, onDeleted }: Props): Re
 
       if (caught instanceof ApiError) {
         if (caught.status === 401) {
+          if (caught.message === "Incorrect password.") {
+            setError("Incorrect password.");
+            return;
+          }
+          // Any other 401 means the admin's own session died while the
+          // dialog was open, not that the password was wrong.
           redirectToLoginAfterSessionExpiry(router);
           return;
         }
@@ -89,7 +97,7 @@ export default function DeleteUserModal({ user, onClose, onDeleted }: Props): Re
     }
   }
 
-  const canSubmit = deleteButtonEnabled(typed, user?.email, busy);
+  const canSubmit = deleteButtonEnabled(typed, user?.email, password, busy);
 
   return (
     <dialog
@@ -125,6 +133,18 @@ export default function DeleteUserModal({ user, onClose, onDeleted }: Props): Re
             spellCheck={false}
             value={typed}
             onChange={(event) => setTyped(event.target.value)}
+            disabled={busy}
+          />
+        </label>
+
+        <label className="field">
+          <span>Your password</span>
+          <input
+            id="confirm-delete-admin-password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
             disabled={busy}
           />
         </label>

@@ -96,17 +96,23 @@ describe("formatLastSeen", () => {
 });
 
 describe("delete confirmation gate", () => {
-  it("enables only on the exact email, and never while a delete is in flight", () => {
-    const email = "target@test.com";
+  const email = "target@test.com";
+
+  it("needs the exact email", () => {
     expect(canConfirmDelete("target@test.com", email)).toBe(true);
     expect(canConfirmDelete("  target@test.com ", email)).toBe(true);
     for (const typed of ["", "target", "target@test.co", "TARGET@test.com", "target@test.comx"]) {
       expect(canConfirmDelete(typed, email), typed).toBe(false);
-      expect(deleteButtonEnabled(typed, email, false), typed).toBe(false);
+      expect(deleteButtonEnabled(typed, email, "pw", false), typed).toBe(false);
     }
-    expect(deleteButtonEnabled(email, email, false)).toBe(true);
-    expect(deleteButtonEnabled(email, email, true)).toBe(false);
-    expect(deleteButtonEnabled(email, undefined, false)).toBe(false);
+  });
+
+  it("needs the exact email AND a non-empty password, never while in flight", () => {
+    expect(deleteButtonEnabled(email, email, "pw", false)).toBe(true);
+    expect(deleteButtonEnabled(email, email, "", false)).toBe(false);
+    expect(deleteButtonEnabled("wrong@test.com", email, "pw", false)).toBe(false);
+    expect(deleteButtonEnabled(email, email, "pw", true)).toBe(false);
+    expect(deleteButtonEnabled(email, undefined, "pw", false)).toBe(false);
   });
 });
 
@@ -158,9 +164,9 @@ describe("listReducer", () => {
 
 describe("admin-api", () => {
   function captureFetch(respond: () => Response) {
-    const calls: { url: string; method: string }[] = [];
+    const calls: { url: string; method: string; body?: BodyInit | null }[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit = {}) => {
-      calls.push({ url, method: init.method ?? "GET" });
+      calls.push({ url, method: init.method ?? "GET", body: init.body });
       return respond();
     }));
     return calls;
@@ -180,13 +186,19 @@ describe("admin-api", () => {
     ]);
   });
 
-  it("deletes by id and surfaces the backend's refusal", async () => {
+  it("deletes by id with the admin's password in the body, and surfaces the refusal", async () => {
     const calls = captureFetch(
       () => new Response(JSON.stringify({ detail: "This account is an admin." }), { status: 409 }),
     );
 
-    await expect(deleteUser("id/1")).rejects.toEqual(new ApiError(409, "This account is an admin."));
+    await expect(deleteUser("id/1", "AdminPass123")).rejects.toEqual(new ApiError(409, "This account is an admin."));
     expect(calls[0]).toMatchObject({ method: "DELETE" });
     expect(calls[0].url).toMatch(/\/v1\/admin\/users\/id%2F1$/);
+    expect(JSON.parse(String(calls[0].body))).toEqual({ password: "AdminPass123" });
+  });
+
+  it("surfaces a wrong password as its own 401, distinct from an expired session", async () => {
+    captureFetch(() => new Response(JSON.stringify({ detail: "Incorrect password." }), { status: 401 }));
+    await expect(deleteUser("id-1", "nope")).rejects.toEqual(new ApiError(401, "Incorrect password."));
   });
 });
