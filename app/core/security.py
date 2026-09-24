@@ -51,6 +51,7 @@ def _create_token(
     subject: str,
     expires_delta: timedelta,
     token_type: str,
+    extra_claims: dict[str, Any] | None = None,
 ) -> str:
 
     now = datetime.now(timezone.utc)
@@ -60,6 +61,7 @@ def _create_token(
         "type": token_type,
         "iat": now,
         "exp": now + expires_delta,
+        **(extra_claims or {}),
     }
 
     return jwt.encode(
@@ -79,13 +81,38 @@ def create_access_token(user_id: str) -> str:
     )
 
 
-def create_refresh_token(user_id: str) -> str:
+def create_refresh_token(
+    user_id: str,
+    session_start: int | None = None,
+) -> str:
+    """
+    session_start: the unix timestamp the session began, carried
+    forward unchanged across every refresh (see app/routes/auth.py
+    refresh()). Omit it for a brand-new session (login/signup) —
+    it defaults to this token's own iat, which is exactly what a
+    first refresh token's session_start should be.
+
+    Each refresh token's own "exp" still resets to a fresh
+    refresh_token_expire_days on every reissue (an idle timeout:
+    unused for that long and the token itself expires normally).
+    session_start is the separate, non-resetting clock that lets
+    the route enforce an absolute cap on total session age
+    regardless of how often it's refreshed.
+    """
+    now = datetime.now(timezone.utc)
     return _create_token(
         user_id,
         timedelta(
             days=settings.refresh_token_expire_days
         ),
         "refresh",
+        extra_claims={
+            "session_start": (
+                session_start
+                if session_start is not None
+                else int(now.timestamp())
+            ),
+        },
     )
 
 

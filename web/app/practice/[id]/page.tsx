@@ -15,10 +15,10 @@ import SpeechTrack, {
 import VisualDeliverySection from "@/components/VisualDeliverySection";
 import {
   ApiError,
-  clearTokens,
   getAccessToken,
   getReport,
   getSession,
+  redirectToLoginAfterSessionExpiry,
 } from "@/lib/api";
 import {
   CATEGORY_LABEL,
@@ -82,8 +82,7 @@ export default function SessionPage(): ReactElement {
 
       if (caught instanceof ApiError) {
         if (caught.status === 401) {
-          clearTokens();
-          router.replace("/login");
+          redirectToLoginAfterSessionExpiry(router);
           return false;
         }
 

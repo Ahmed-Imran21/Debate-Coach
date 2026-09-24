@@ -4,7 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ReactElement } from "react";
 
-import { ApiError, clearTokens, getAccessToken, getAdminStats } from "@/lib/api";
+import {
+  ApiError,
+  getAccessToken,
+  getAdminStats,
+  redirectToLoginAfterSessionExpiry,
+} from "@/lib/api";
 import SiteHeader from "@/components/SiteHeader";
 import type { AdminStats } from "@/lib/types";
 
@@ -35,8 +40,7 @@ export default function AdminPage(): ReactElement {
       if (leftPageRef.current) return;
 
       if (caught instanceof ApiError && caught.status === 401) {
-        clearTokens();
-        router.replace("/login");
+        redirectToLoginAfterSessionExpiry(router);
         return;
       }
 
