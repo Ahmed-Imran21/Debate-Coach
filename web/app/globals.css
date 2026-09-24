@@ -761,6 +761,51 @@ code {
 }
 
 /* ------------------------------------------------------------
+   Data table (admin user list)
+   ------------------------------------------------------------
+   The session list's rules, spacing and type (.rows/.row,
+   .row-title, .row-meta), laid out in columns. Scrolls sideways
+   inside its own container on narrow screens. */
+
+.table-scroll {
+  overflow-x: auto;
+  border-top: 1px solid var(--rule);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.data-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 0.8125rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  padding: 0.75rem 1.25rem 0.75rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.data-table td {
+  padding: 1rem 1.25rem 1rem 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: middle;
+}
+
+.data-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.data-table .actions {
+  text-align: right;
+  white-space: nowrap;
+  padding-right: 0;
+}
+
+/* ------------------------------------------------------------
    Recorder
    ------------------------------------------------------------ */
 

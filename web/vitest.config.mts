@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 import { defineConfig } from "vitest/config";
 
 // Pure TypeScript modules only (video-analysis math, scheduler,
@@ -5,6 +7,10 @@ import { defineConfig } from "vitest/config";
 // those need a browser and are covered by the manual test plan
 // and the debug page instead. Keep this config minimal.
 export default defineConfig({
+  // Same "@/..." alias tsconfig.json declares, for modules that use it.
+  resolve: {
+    alias: { "@": fileURLToPath(new URL(".", import.meta.url)) },
+  },
   test: {
     environment: "node",
     include: [
