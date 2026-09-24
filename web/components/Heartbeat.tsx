@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-import { getAccessToken, heartbeat } from "@/lib/api";
+import { ensureServerSession, getAccessToken, heartbeat } from "@/lib/api";
 
 const INTERVAL_MS = 60_000;
 
@@ -21,9 +21,14 @@ export default function Heartbeat(): null {
   useEffect(() => {
     if (!getAccessToken()) return;
 
-    // Fire once immediately rather than waiting a full interval
-    // for the first tick, then on the regular cadence.
-    void heartbeat().catch(() => {});
+    // A page load is real activity, so this is where a session that
+    // predates this tab (or whose gate cookie expired with its access
+    // token) gets synced — refreshing first if the token has expired.
+    // The first heartbeat waits for it so it goes out with a live
+    // token; the interval below never refreshes (see heartbeat()).
+    void ensureServerSession()
+      .catch(() => {})
+      .finally(() => heartbeat().catch(() => {}));
 
     const id = setInterval(() => {
       if (!getAccessToken()) return;
