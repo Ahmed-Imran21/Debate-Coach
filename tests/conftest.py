@@ -26,6 +26,9 @@ os.environ.setdefault("VIDEO_ANALYSIS_ENABLED", "true")
 # request shares one client address, so route tests across files
 # would otherwise 429 each other once the suite passes ~60 calls.
 os.environ.setdefault("REQUEST_RATE_LIMIT_PER_MINUTE", "100000")
+# Tests assert the production default (docs off); a developer's .env
+# turning them on for local use must not leak in.
+os.environ.setdefault("API_DOCS_ENABLED", "false")
 
 
 def _word(text: str, start: float, end: float) -> dict:

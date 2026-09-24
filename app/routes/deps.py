@@ -63,16 +63,32 @@ def get_current_user(
     return user
 
 
+def _optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(
+        _bearer_scheme
+    ),
+    db: Session = Depends(get_db),
+) -> User | None:
+    try:
+        return get_current_user(credentials, db)
+    except HTTPException:
+        return None
+
+
 def require_admin(
-    current_user: User = Depends(get_current_user),
+    current_user: User | None = Depends(_optional_user),
 ) -> User:
     """
-    Every route in app/routes/admin.py depends on this, not on
-    get_current_user directly — a signed-in, non-admin user must
-    always get a 403 here, never reach the route body. The
-    frontend's own /admin gate (web/middleware.ts) checks the
-    same ADMIN_EMAILS list server-side before rendering anything,
-    but that is UX, not the security boundary: this dependency is.
+    Every route in app/routes/admin.py depends on this — it is the
+    security boundary; web/middleware.ts's /admin gate is UX.
+
+    Anyone who isn't an admin — no token, a bad or expired token,
+    or a signed-in non-admin — gets FastAPI's own "no such route"
+    response, byte for byte, so the admin routes can't be told
+    apart from paths that don't exist. A 401 or 403 here would
+    confirm they do. See also main.py's 405 handler and
+    redirect_slashes=False, which close the same gap for wrong
+    methods and trailing slashes.
 
     Email, not a role column, on purpose — there is exactly one
     admin (the person running this env), controlled entirely by
@@ -80,10 +96,13 @@ def require_admin(
     not a migration or a deploy.
     """
 
-    if current_user.email.lower() not in settings.admin_emails_list:
+    if (
+        current_user is None
+        or current_user.email.lower() not in settings.admin_emails_list
+    ):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not Found",
         )
 
     return current_user

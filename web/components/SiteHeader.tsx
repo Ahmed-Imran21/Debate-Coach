@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 
-import { isCurrentUserAdmin } from "@/lib/api";
+import { getAdminLink, type AdminLink } from "@/lib/api";
 
 interface Props {
   /** The practice area gets a reduced nav, since the marketing
@@ -18,19 +18,18 @@ export default function SiteHeader({
   // Only ever checked for the signed-in nav — "site" is shown to
   // a visitor regardless of actual auth state (see the /about
   // comment below), so there is no signed-in user to check here.
-  // isCurrentUserAdmin() is memoized per access token (lib/api.ts),
-  // so this component re-mounting on every page navigation costs
-  // one shared network round trip total, not one per page — a
-  // non-admin's browser makes exactly one cheap, silently-failing
-  // request for the whole session and never shows the link.
-  const [isAdmin, setIsAdmin] = useState(false);
+  // The link's href and label come from the session sync response
+  // (lib/api.ts getAdminLink, memoized per access token), which
+  // only an admin ever receives — neither is in this file, so the
+  // admin page's path isn't in code every visitor downloads.
+  const [adminLink, setAdminLink] = useState<AdminLink | null>(null);
 
   useEffect(() => {
     if (variant !== "app") return;
 
     let cancelled = false;
-    isCurrentUserAdmin().then((admin) => {
-      if (!cancelled) setIsAdmin(admin);
+    getAdminLink().then((link) => {
+      if (!cancelled) setAdminLink(link);
     });
 
     return () => {
@@ -77,7 +76,7 @@ export default function SiteHeader({
               {/* Absent, not disabled/greyed, for a non-admin —
                   same "don't reveal the route exists" principle
                   middleware.ts already applies to the page itself. */}
-              {isAdmin && <Link href="/admin">Admin</Link>}
+              {adminLink && <Link href={adminLink.href}>{adminLink.label}</Link>}
             </>
           )}
         </nav>
