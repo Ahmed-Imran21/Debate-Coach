@@ -1,6 +1,8 @@
+import uuid
+
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -10,11 +12,14 @@ from app.models.user import User
 from app.routes.deps import require_admin
 from app.schemas.admin import (
     AdminStatsOut,
+    AdminUserOut,
+    AdminUserPageOut,
     AdminWhoAmIOut,
     KeyUsageOut,
     StorageUsageOut,
 )
-from app.services import engine, storage
+from app.services import admin_users, engine, storage
+from app.services.accounts import AccountBusyError, delete_user_account
 from app.services.key_usage import get_usage_snapshot
 
 
@@ -75,3 +80,101 @@ def stats(
             remaining_gb=round(max(0.0, quota_gb - used_gb), 3),
         ),
     )
+
+
+@router.get("/users", response_model=AdminUserPageOut)
+def list_users(
+    _admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+    search: str | None = Query(default=None, max_length=100),
+    sort: admin_users.Sort = "newest",
+    limit: int = admin_users.DEFAULT_PAGE_SIZE,
+    cursor: str | None = None,
+) -> AdminUserPageOut:
+    """
+    One page of users, newest signup first (or most recently seen),
+    optionally filtered by a substring of email, first or last name.
+    Pass next_cursor back as ?cursor= for the next page. limit is
+    clamped to 1..100 rather than rejected, like GET /v1/sessions.
+
+    require_admin runs before any query parameter is validated, so a
+    non-admin sending a malformed cursor or limit still gets the same
+    plain 404 as any path that doesn't exist.
+    """
+
+    try:
+        rows, next_cursor = admin_users.list_users(
+            db, sort=sort, search=search, limit=limit, cursor=cursor
+        )
+    except admin_users.InvalidCursorError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid cursor. Start again from the first page.",
+        ) from None
+
+    admins = set(settings.admin_emails_list)
+    return AdminUserPageOut(
+        users=[
+            AdminUserOut(**vars(row), is_admin=row.email.lower() in admins)
+            for row in rows
+        ],
+        next_cursor=next_cursor,
+    )
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> None:
+    """
+    Force-delete another user's account and everything it owns,
+    through the same delete_user_account() as the self-service delete.
+    The caller's admin session is the authorization; no password from
+    the target user.
+
+    Refused, with 409, for:
+    - the calling admin's own account: self-deletion goes through
+      DELETE /v1/users/me, which re-checks the password, so a stolen
+      admin session can't delete the admin's own account with none.
+    - any other admin: admin rights come from ADMIN_EMAILS, not the
+      database, so deleting the account wouldn't revoke them (signing
+      up again with the same email restores them). Removing the email
+      from ADMIN_EMAILS is the step that actually demotes someone;
+      after that their account is an ordinary one this route deletes.
+    """
+
+    target = db.get(User, user_id)
+
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+    if target.id == admin.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "You can't delete your own account from here. Use Delete "
+                "account on your practice page, which asks for your password."
+            ),
+        )
+
+    if target.email.lower() in settings.admin_emails_list:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This account is an admin. Remove its email from "
+                "ADMIN_EMAILS first; then it can be deleted here."
+            ),
+        )
+
+    try:
+        delete_user_account(db, target)
+    except AccountBusyError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "One of this user's sessions is still being analyzed. "
+                "Try again once it finishes."
+            ),
+        ) from None
