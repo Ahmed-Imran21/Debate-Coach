@@ -2,8 +2,11 @@ import logging
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.last_seen import LastSeenMiddleware
@@ -103,6 +106,24 @@ app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(users.router, prefix=API_PREFIX)
 app.include_router(sessions.router, prefix=API_PREFIX)
 app.include_router(admin.router, prefix=API_PREFIX)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_without_input(
+    request: Request,
+    exc: RequestValidationError,
+) -> JSONResponse:
+    # FastAPI's default handler echoes each rejected field's value
+    # back as "input" — for signup that's the plaintext password.
+    # The frontend only reads "msg" (web/lib/api.ts readError).
+    errors = [
+        {key: value for key, value in error.items() if key != "input"}
+        for error in exc.errors()
+    ]
+    return JSONResponse(
+        status_code=422,
+        content={"detail": jsonable_encoder(errors)},
+    )
 
 
 @app.get("/health")
