@@ -13,7 +13,7 @@ from app.core.last_seen import LastSeenMiddleware
 from app.core.rate_limit import PerClientRateLimitMiddleware
 from app.db.database import Base, engine as db_engine
 from app.routes import admin, auth, sessions, users
-from app.services import engine, jobs
+from app.services import cleanup, engine, jobs
 from app.services.audio_convert import ffmpeg_available
 
 
@@ -34,6 +34,12 @@ async def lifespan(app: FastAPI):
     # For anything beyond local development, replace this with
     # Alembic migrations run as a deploy step.
     Base.metadata.create_all(bind=db_engine)
+
+    # Before jobs.start() below lets any new pipeline begin, so a
+    # session found mid-pipeline here is guaranteed left over from
+    # whatever process ran before this one, never one this process
+    # is already running. Logs its own summary internally.
+    cleanup.reap_stuck_pipelines()
 
     if not ffmpeg_available():
         logger.warning(
@@ -65,9 +71,13 @@ async def lifespan(app: FastAPI):
         settings.pipeline_workers,
     )
 
+    cleanup.start()
+
     yield
 
     logger.info("Shutting down.")
+
+    cleanup.shutdown()
 
     # Stop accepting new pipeline work first, then drain the
     # API queues. Doing it the other way round would leave
