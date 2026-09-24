@@ -195,8 +195,6 @@ def test_new_session_object_keys_are_scoped_to_creator(token_client, make_user):
         ("DELETE", "/v1/sessions/{sid}"),
         ("GET", "/v1/users/me"),
         ("POST", "/v1/users/heartbeat"),
-        ("GET", "/v1/admin/whoami"),
-        ("GET", "/v1/admin/stats"),
     ],
 )
 def test_unauthenticated_requests_rejected(token_client, victim_session, method, path):
@@ -253,11 +251,12 @@ def test_forged_tokens_rejected(token_client, victim_session):
 
 
 @pytest.mark.parametrize("path", ["/v1/admin/whoami", "/v1/admin/stats"])
-def test_non_admin_gets_403_on_admin_routes(token_client, make_user, monkeypatch, path):
+def test_non_admin_is_refused_on_admin_routes(token_client, make_user, monkeypatch, path):
+    """404, not 403: see tests/api/test_admin_route_hiding.py."""
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "admin_emails", "boss@test")
     client, headers_for = token_client
 
     r = client.get(path, headers=headers_for(make_user("a@test")))
-    assert r.status_code == 403
+    assert r.status_code == 404

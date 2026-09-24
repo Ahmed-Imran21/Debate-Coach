@@ -103,6 +103,11 @@ class Settings(BaseSettings):
 
     allowed_origins: str = "http://localhost:3000"
 
+    # /docs, /redoc and /openapi.json. Off unless explicitly turned
+    # on (local dev's .env does), so a deploy that forgets this
+    # setting hides the API's route list rather than publishing it.
+    api_docs_enabled: bool = False
+
     # Requests per minute per client, enforced by
     # app/core/rate_limit.py.
     request_rate_limit_per_minute: int = 60
