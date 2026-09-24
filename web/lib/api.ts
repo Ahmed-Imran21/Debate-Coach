@@ -15,6 +15,38 @@ const BASE = (
 const ACCESS_KEY = "dc.access";
 const REFRESH_KEY = "dc.refresh";
 
+// Ordinary JSON round trips (list sessions, get a report, log in).
+// Generous for a slow connection, short enough that a genuinely
+// stalled request doesn't leave a page hanging indefinitely with
+// no feedback — previously nothing here had any timeout at all,
+// so a stalled (not failed) connection just hung the fetch()
+// forever.
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+// The audio blob PUT specifically (uploadAndStart, and Recorder.tsx's
+// video-analysis path via putToSignedUrl below) goes straight to a
+// GCS signed URL, never through request(). A real debate-practice
+// recording (opus-compressed speech) is a few MB even for several
+// minutes; the 100 MB server-side cap (app/core/config.py
+// max_upload_mb) is a safety ceiling, not a realistic size. This is
+// generous enough to never abort a real transfer still in progress
+// on a slow connection, while still eventually giving up and
+// reporting a stall instead of leaving "Sending" on screen forever.
+const UPLOAD_TIMEOUT_MS = 10 * 60_000;
+
+/** AbortSignal.timeout ships in every browser this app already
+ * requires (Recorder.tsx's own MediaRecorder check), but falls back
+ * to no signal rather than throwing if it's ever missing. */
+function timeoutSignal(ms: number): AbortSignal | undefined {
+  return typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+    ? AbortSignal.timeout(ms)
+    : undefined;
+}
+
+function isTimeout(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "TimeoutError";
+}
+
 /**
  * Tokens live in localStorage.
  *
@@ -103,20 +135,33 @@ async function refreshTokens(): Promise<boolean> {
   const refresh = getRefreshToken();
   if (!refresh) return false;
 
-  const response = await fetch(`${BASE}/v1/auth/refresh`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: refresh }),
-    // localhost:3000 and the API origin are different ports, so
-    // different origins — without this, the browser silently
-    // discards this response's Set-Cookie (app/routes/auth.py's
-    // admin-only dc_admin_session), same reasoning as login/signup
-    // below. Needed here too: an admin session left open past the
-    // access token's expiry refreshes through this path, and
-    // without a fresh Set-Cookie each time, the admin cookie would
-    // just expire on its own original schedule and never renew.
-    credentials: "include",
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(`${BASE}/v1/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refresh }),
+      // localhost:3000 and the API origin are different ports, so
+      // different origins — without this, the browser silently
+      // discards this response's Set-Cookie (app/routes/auth.py's
+      // admin-only dc_admin_session), same reasoning as login/signup
+      // below. Needed here too: an admin session left open past the
+      // access token's expiry refreshes through this path, and
+      // without a fresh Set-Cookie each time, the admin cookie would
+      // just expire on its own original schedule and never renew.
+      credentials: "include",
+      signal: timeoutSignal(DEFAULT_TIMEOUT_MS),
+    });
+  } catch {
+    // Previously unguarded: a network failure or a stalled
+    // connection here threw straight out of request()'s own
+    // `await refreshTokens()`, past the 401 handling entirely, as
+    // a raw, unrelated-looking exception. Treat exactly like a
+    // refresh the server actively rejected.
+    clearTokens();
+    return false;
+  }
 
   if (!response.ok) {
     clearTokens();
@@ -150,6 +195,10 @@ interface RequestOptions {
    * from sending/receiving credentials cross-origin.
    */
   credentials?: RequestCredentials;
+  /** Overrides DEFAULT_TIMEOUT_MS. Not used by any caller today —
+   * present so a genuinely slow endpoint can opt into a longer
+   * window without changing the default every other call gets. */
+  timeoutMs?: number;
 }
 
 async function request<T>(
@@ -164,6 +213,7 @@ async function request<T>(
     auth = true,
     retryOnAuthFailure = true,
     credentials,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
   } = options;
 
   const headers: Record<string, string> = { ...extraHeaders };
@@ -177,12 +227,29 @@ async function request<T>(
     if (token) headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${BASE}${path}`, {
-    method,
-    headers,
-    body: rawBody !== undefined ? rawBody : body === undefined ? undefined : JSON.stringify(body),
-    ...(credentials ? { credentials } : {}),
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(`${BASE}${path}`, {
+      method,
+      headers,
+      body: rawBody !== undefined ? rawBody : body === undefined ? undefined : JSON.stringify(body),
+      ...(credentials ? { credentials } : {}),
+      signal: timeoutSignal(timeoutMs),
+    });
+  } catch (caught) {
+    // Previously fetch()'s own rejection (a stalled connection
+    // with no timeout at all, or a real network failure) just
+    // propagated as-is — every caller's `instanceof ApiError`
+    // check already treats a non-ApiError as "the request never
+    // reached the server," so this only adds a message specific
+    // enough to tell someone their connection stalled rather than
+    // something being wrong with the request itself.
+    if (isTimeout(caught)) {
+      throw new ApiError(408, "The request timed out. Check your connection and try again.");
+    }
+    throw caught;
+  }
 
   // An expired access token is the common case, not an error.
   // Swap it for a fresh one and replay once.
@@ -404,6 +471,46 @@ export function uploadVisualSignals(
 }
 
 /**
+ * PUTs straight to a GCS signed URL — never through request(), since
+ * the API server never sees these bytes at all (see uploadAndStart's
+ * own doc). Shared by uploadAndStart below and by Recorder.tsx's
+ * video-analysis path, which needs the same PUT with different
+ * steps around it. Previously each had its own inline fetch() with
+ * no timeout; a stalled connection left "Sending" on screen with no
+ * way to know it had stalled rather than just being slow.
+ */
+export async function putToSignedUrl(
+  url: string,
+  headers: Record<string, string>,
+  body: BodyInit,
+): Promise<void> {
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      method: "PUT",
+      headers,
+      body,
+      signal: timeoutSignal(UPLOAD_TIMEOUT_MS),
+    });
+  } catch (caught) {
+    throw new ApiError(
+      isTimeout(caught) ? 408 : 0,
+      isTimeout(caught)
+        ? "The upload timed out. Check your connection and try again."
+        : "The recording could not be uploaded. Check your connection and try again.",
+    );
+  }
+
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      "The recording could not be uploaded. Check your connection and try again.",
+    );
+  }
+}
+
+/**
  * Reserve a session, PUT the audio straight to object storage,
  * then tell the API to begin.
  *
@@ -422,18 +529,7 @@ export async function uploadAndStart(
     title,
   });
 
-  const upload = await fetch(created.upload_url, {
-    method: "PUT",
-    headers: created.upload_headers,
-    body: blob,
-  });
-
-  if (!upload.ok) {
-    throw new ApiError(
-      upload.status,
-      "The recording could not be uploaded. Check your connection and try again.",
-    );
-  }
+  await putToSignedUrl(created.upload_url, created.upload_headers, blob);
 
   await startSession(created.id);
 

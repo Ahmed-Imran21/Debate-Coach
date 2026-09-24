@@ -7,6 +7,7 @@ import type { ReactElement } from "react";
 import {
   ApiError,
   createSession,
+  putToSignedUrl,
   startSession,
   uploadAndStart,
   type VideoFinalize,
@@ -388,17 +389,7 @@ export default function Recorder(): ReactElement {
         video_analysis: "requested",
       });
 
-      const audioUpload = await fetch(created.upload_url, {
-        method: "PUT",
-        headers: created.upload_headers,
-        body: blob,
-      });
-      if (!audioUpload.ok) {
-        throw new ApiError(
-          audioUpload.status,
-          "The recording could not be uploaded. Check your connection and try again.",
-        );
-      }
+      await putToSignedUrl(created.upload_url, created.upload_headers, blob);
 
       // Make sure onstop's finalization (building the track,
       // closing the extractor) has actually finished before
