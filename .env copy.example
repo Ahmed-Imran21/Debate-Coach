@@ -1,0 +1,117 @@
+# ============================================================
+# Debate Coach
+#
+# Copy to .env and fill in. Two config systems read this file:
+#
+#   api/config.py      the round-robin API key pool
+#   app/core/config.py the web layer
+#
+# They do not overlap. Adding another API key is a change here
+# and nowhere else.
+# ============================================================
+
+
+# ============================================================
+# SECTION 1: API KEY POOL (read by api/config.py)
+#
+# Naming convention:
+#
+#   <PROVIDER>_<MODEL>_KEY_<N>
+#
+# The provider and model are encoded in the variable name, so
+# the scheduler can route a request for a specific model to
+# only the keys registered for it. N starts at 1 and has no
+# upper bound. Adding KEY_4 requires no code change.
+#
+# Keys are used round-robin, with per-key usage tracked against
+# the limits declared in api/config.py's KEY_CONFIGS.
+# ============================================================
+
+# --- GROQ: openai/gpt-oss-120b (coaching analysis) ---
+GROQ_GPT_OSS_120B_KEY_1=
+GROQ_GPT_OSS_120B_KEY_2=
+GROQ_GPT_OSS_120B_KEY_3=
+
+# --- GROQ: llama-3.3-70b-versatile ---
+GROQ_LLAMA_3_3_70B_KEY_1=
+GROQ_LLAMA_3_3_70B_KEY_2=
+GROQ_LLAMA_3_3_70B_KEY_3=
+
+# --- GEMINI: gemini-2.5-flash ---
+GEMINI_2_5_FLASH_KEY_1=
+GEMINI_2_5_FLASH_KEY_2=
+GEMINI_2_5_FLASH_KEY_3=
+
+# --- GROQ: whisper-large-v3 (transcription) ---
+GROQ_WHISPER_LARGE_V3_KEY_1=
+GROQ_WHISPER_LARGE_V3_KEY_2=
+GROQ_WHISPER_LARGE_V3_KEY_3=
+
+
+# --- Whisper pool limits ---
+# Conservative defaults matching Groq's documented
+# whisper-large-v3 limits. Raise these only to match what your
+# own account dashboard reports.
+
+GROQ_WHISPER_RPM=20
+GROQ_WHISPER_RPD=2000
+GROQ_WHISPER_ASH=7200
+GROQ_WHISPER_ASD=28800
+GROQ_WHISPER_MAX_FILE_MB=100
+WHISPER_WORKERS=8
+WHISPER_QUEUE_WAIT_SECONDS=0.5
+
+
+# ============================================================
+# SECTION 2: WEB LAYER (read by app/core/config.py)
+# ============================================================
+
+# --- Database ---
+# Local:      postgresql+psycopg2://postgres:postgres@localhost:5432/debate_coach
+# Managed:    take the connection string from your provider and
+#             make sure the driver prefix is postgresql+psycopg2
+DATABASE_URL=
+
+# --- Auth ---
+# Generate with: python -c "import secrets; print(secrets.token_urlsafe(48))"
+# Rotating this signs every existing user out.
+JWT_SECRET_KEY=
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+REFRESH_TOKEN_EXPIRE_DAYS=30
+
+# --- Object storage (S3-compatible) ---
+# Cloudflare R2: https://<account-id>.r2.cloudflarestorage.com
+# AWS S3:        https://s3.<region>.amazonaws.com
+STORAGE_ENDPOINT_URL=
+STORAGE_ACCESS_KEY_ID=
+STORAGE_SECRET_ACCESS_KEY=
+STORAGE_BUCKET_NAME=
+STORAGE_REGION=auto
+STORAGE_URL_EXPIRY_SECONDS=900
+
+# The bucket needs a CORS rule allowing PUT from your web
+# origin, or browser uploads are blocked before they start:
+#
+#   AllowedOrigins: https://yourdomain.com
+#   AllowedMethods: PUT
+#   AllowedHeaders: content-type
+#   MaxAgeSeconds:  3600
+#
+# The bucket itself must stay private. Every read goes through
+# a presigned link issued by the API.
+
+# --- Pipeline ---
+PIPELINE_WORKERS=4
+MAX_UPLOAD_MB=100
+
+# --- HTTP ---
+# Comma-separated. Include every origin the web app is served
+# from, with no trailing slash.
+ALLOWED_ORIGINS=http://localhost:3000
+REQUEST_RATE_LIMIT_PER_MINUTE=60
+
+# Set true only when running behind a proxy that sets
+# X-Forwarded-For. If it is true without a proxy in front, a
+# client can spoof its own rate-limit bucket.
+TRUST_FORWARDED_FOR=false

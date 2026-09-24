@@ -1,0 +1,31 @@
+# Controls what's uploaded to Cloud Build as source. Kept
+# separate from .gitignore on purpose: without this file, gcloud
+# falls back to treating .gitignore as the ignore list, which
+# would silently drop .env.production (it matches .gitignore's
+# .env.* pattern) — cloudbuild.yaml's deploy step reads that file
+# to populate Cloud Run's environment variables, so losing it
+# means the container starts with none of them set.
+
+.git/
+.gitignore
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+node_modules/
+web/node_modules/
+web/.next/
+.next/
+
+# Local secrets and personal data. Every upload lands in the
+# project's _cloudbuild bucket and stays there; none of this is
+# copied into the image anyway (see the Dockerfile's COPY list).
+.env
+.env.*
+!.env.production
+web/
+sessions/
+sessions copy/
+.pytest_cache/
+.vscode/

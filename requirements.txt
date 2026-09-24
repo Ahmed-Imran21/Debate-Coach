@@ -1,0 +1,72 @@
+# ============================================================
+# Debate Coach backend
+#
+# Pinned with compatible-release specifiers so patch updates
+# come through but a major version cannot land silently.
+#
+# Note on torch: the CPU wheel is installed explicitly in the
+# Dockerfile from PyTorch's CPU index. Installing the default
+# wheel here pulls roughly 2 GB of CUDA libraries that a
+# Silero VAD pass on a server will never use.
+# ============================================================
+
+# --- Web layer ---
+fastapi~=0.115.0
+uvicorn[standard]~=0.32.0
+python-multipart~=0.0.12
+
+# --- Config and validation ---
+pydantic~=2.9.0
+pydantic-settings~=2.6.0
+email-validator~=2.2.0
+python-dotenv~=1.0.1
+
+# --- Database ---
+SQLAlchemy~=2.0.35
+psycopg[binary]~=3.3.0
+alembic~=1.13.3
+
+# Cloud SQL Python Connector. [pg8000] pulls in the matching
+# driver extra — the connector only supports pg8000/asyncpg/
+# pymysql/pytds, not psycopg, so the Cloud Run connection path
+# uses pg8000 while local/direct connections above use psycopg
+# (see app/db/database.py).
+cloud-sql-python-connector[pg8000]~=1.21.0
+
+# --- Auth ---
+python-jose[cryptography]~=3.3.0
+passlib~=1.7.4
+bcrypt~=4.2.0
+
+# --- Object storage ---
+google-cloud-storage~=3.14.0
+
+# --- LLM and speech providers ---
+# Used by api/providers/ and api/whisper.py. The round-robin
+# key pool in api/ drives both; neither is configured here.
+groq~=0.11.0
+google-genai~=0.3.0
+
+# groq 0.11 builds its transport with httpx.Client(proxies=...),
+# and httpx removed that argument in 0.28 — leaving it unpinned
+# means every Groq() construction dies with
+# "TypeError: Client.__init__() got an unexpected keyword
+# argument 'proxies'" the moment a session starts analysis.
+# Lift this pin only together with a groq upgrade that drops the
+# proxies kwarg (verify api/providers/groq.py and api/whisper.py
+# still construct cleanly). google-genai 0.3 is unaffected either
+# way.
+httpx<0.28
+
+# --- Audio analysis ---
+silero-vad~=5.1.2
+numpy~=1.26.4
+soundfile~=0.12.1
+
+# ffmpeg is a system package, not a Python one. See Dockerfile.
+
+# --- Not installed on the server ---
+# sounddevice is only needed by audio/recorder.py, which is the
+# local CLI microphone path. The web and mobile clients record
+# in the browser or on the device, so the server never needs a
+# sound card and never imports that module.

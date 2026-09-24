@@ -1,0 +1,366 @@
+{
+  "schema": "debatecoach.visual_signals",
+  "schema_version": "1.0",
+  "session_id": "11111111-1111-4111-8111-111111111111",
+  "source": {
+    "platform": "web",
+    "client_version": "test-fixture",
+    "user_agent_family": "chrome",
+    "runtime": {
+      "name": "mediapipe-tasks-vision",
+      "version": "1.0.1",
+      "delegate": "GPU"
+    },
+    "models": [
+      {
+        "task": "face_landmarker",
+        "model_id": "face_landmarker.task",
+        "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+      },
+      {
+        "task": "hand_landmarker",
+        "model_id": "hand_landmarker.task",
+        "sha256": "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"
+      }
+    ],
+    "device_tier": "full",
+    "benchmark_fps": 11.5
+  },
+  "capture": {
+    "frame_width": 640,
+    "frame_height": 360,
+    "input_mirrored": false,
+    "handedness_convention": "anatomical",
+    "target_fps": 10
+  },
+  "clock": {
+    "t0_reference": "audio_recording_start",
+    "sync_method": "mediarecorder_start_event",
+    "uncertainty_ms": 150,
+    "duration_s": 2.2
+  },
+  "calibration": {
+    "performed": true,
+    "baseline": {
+      "head_yaw": 1.8,
+      "head_pitch": -2.5,
+      "iris_x": 0.02,
+      "iris_y": -0.01
+    },
+    "samples": 28,
+    "stability": 0.91,
+    "right_hand_check": "passed"
+  },
+  "context": {
+    "setting": "camera_audience",
+    "uses_notes": false
+  },
+  "setup_check": {
+    "face_visible": true,
+    "hands_visible_when_raised": true,
+    "lighting": "ok",
+    "distance": "ok"
+  },
+  "frames": {
+    "t": [
+      0.1,
+      0.2,
+      0.3,
+      0.4,
+      0.5,
+      0.6,
+      0.7,
+      0.8,
+      0.9,
+      1,
+      1.2,
+      1.3,
+      2.1
+    ],
+    "face_count": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      null,
+      null,
+      1
+    ],
+    "head_yaw": [
+      2,
+      2.1,
+      2.2,
+      2.3,
+      2.4,
+      2.5,
+      2.6,
+      2.7,
+      2.8,
+      2.9,
+      null,
+      null,
+      -1
+    ],
+    "head_pitch": [
+      -3,
+      -3,
+      -3,
+      -3,
+      -3,
+      -3,
+      -3,
+      -3,
+      -3,
+      -3,
+      null,
+      null,
+      4
+    ],
+    "head_roll": [
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      null,
+      null,
+      -0.2
+    ],
+    "iris_x": [
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      null,
+      null,
+      null
+    ],
+    "iris_y": [
+      -0.02,
+      -0.02,
+      -0.02,
+      -0.02,
+      -0.02,
+      -0.02,
+      -0.02,
+      -0.02,
+      -0.02,
+      -0.02,
+      null,
+      null,
+      null
+    ],
+    "face_scale": [
+      0.09,
+      0.09,
+      0.09,
+      0.09,
+      0.09,
+      0.09,
+      0.09,
+      0.09,
+      0.09,
+      0.09,
+      null,
+      null,
+      0.085
+    ],
+    "face_cx": [
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      null,
+      null,
+      0.48
+    ],
+    "face_cy": [
+      0.4,
+      0.4,
+      0.4,
+      0.4,
+      0.4,
+      0.4,
+      0.4,
+      0.4,
+      0.4,
+      0.4,
+      null,
+      null,
+      0.41
+    ],
+    "lh_present": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      null,
+      null,
+      null
+    ],
+    "lh_score": [
+      0.9,
+      0.9,
+      0.9,
+      0.9,
+      0.9,
+      0.9,
+      0.9,
+      0.9,
+      0.9,
+      0.9,
+      null,
+      null,
+      null
+    ],
+    "lh_cx": [
+      0.32,
+      0.32,
+      0.32,
+      0.32,
+      0.32,
+      0.32,
+      0.32,
+      0.32,
+      0.32,
+      0.32,
+      null,
+      null,
+      null
+    ],
+    "lh_cy": [
+      0.7,
+      0.7,
+      0.7,
+      0.7,
+      0.7,
+      0.7,
+      0.7,
+      0.7,
+      0.7,
+      0.7,
+      null,
+      null,
+      null
+    ],
+    "rh_present": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      null,
+      null,
+      null
+    ],
+    "rh_score": [
+      0.88,
+      0.88,
+      0.88,
+      0.88,
+      0.88,
+      0.88,
+      0.88,
+      0.88,
+      0.88,
+      0.88,
+      null,
+      null,
+      null
+    ],
+    "rh_cx": [
+      0.68,
+      0.68,
+      0.68,
+      0.68,
+      0.68,
+      0.68,
+      0.68,
+      0.68,
+      0.68,
+      0.68,
+      null,
+      null,
+      null
+    ],
+    "rh_cy": [
+      0.71,
+      0.71,
+      0.71,
+      0.71,
+      0.71,
+      0.71,
+      0.71,
+      0.71,
+      0.71,
+      0.71,
+      null,
+      null,
+      null
+    ],
+    "infer_ms": [
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44,
+      null,
+      null,
+      42
+    ]
+  },
+  "gaps": [
+    {
+      "start": 1.4,
+      "end": 2,
+      "reason": "tab_hidden"
+    }
+  ],
+  "degradations": [
+    {
+      "t": 2.1,
+      "face_fps": 7,
+      "hands_fps": 3,
+      "reason": "p90_latency"
+    }
+  ]
+}
