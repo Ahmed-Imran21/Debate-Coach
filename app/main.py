@@ -113,9 +113,11 @@ ADMIN_PREFIX = f"{API_PREFIX}/admin"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins_list,
-    allow_credentials=True,
-    # Exactly what web/ sends; "*" alongside allow_credentials
-    # would echo back any method/header a page asks for.
+    # Auth is a Bearer header, never a cookie, so no cross-origin
+    # request needs credentials; the admin gate cookie lives on the
+    # frontend's own domain (web/app/api/session/route.ts).
+    allow_credentials=False,
+    # Exactly what web/ sends.
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "Content-Encoding"],
 )
