@@ -92,7 +92,8 @@ def test_preflight_allows_everything_the_frontend_sends(api, method, headers):
     r = _preflight(api, method=method, headers=headers)
     assert r.status_code == 200, r.text
     assert r.headers["access-control-allow-origin"] == ORIGIN
-    assert r.headers["access-control-allow-credentials"] == "true"
+    # Bearer-token auth only: the API never asks browsers to send cookies.
+    assert "access-control-allow-credentials" not in r.headers
 
 
 @pytest.mark.parametrize(
