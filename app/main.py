@@ -4,9 +4,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import settings
 from app.core.last_seen import LastSeenMiddleware
@@ -86,21 +88,36 @@ async def lifespan(app: FastAPI):
     engine.shutdown()
 
 
+def api_docs_urls(enabled: bool) -> dict[str, str | None]:
+    # redoc too: FastAPI serves /redoc by default unless told not to.
+    if enabled:
+        return {"docs_url": "/docs", "redoc_url": "/redoc", "openapi_url": "/openapi.json"}
+    return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
+
 app = FastAPI(
     title="Debate Coach API",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/docs",
-    openapi_url="/openapi.json",
+    # A trailing-slash request to a real route would otherwise get a
+    # 307 to the slashless path while an unknown path gets a 404 —
+    # enough to discover the admin routes. Nothing in web/ calls a
+    # path with a trailing slash.
+    redirect_slashes=False,
+    **api_docs_urls(settings.api_docs_enabled),
 )
+
+ADMIN_PREFIX = f"{API_PREFIX}/admin"
 
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins_list,
-    allow_credentials=True,
-    # Exactly what web/ sends; "*" alongside allow_credentials
-    # would echo back any method/header a page asks for.
+    # Auth is a Bearer header, never a cookie, so no cross-origin
+    # request needs credentials; the admin gate cookie lives on the
+    # frontend's own domain (web/app/api/session/route.ts).
+    allow_credentials=False,
+    # Exactly what web/ sends.
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "Content-Encoding"],
 )
@@ -118,6 +135,23 @@ app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(users.router, prefix=API_PREFIX)
 app.include_router(sessions.router, prefix=API_PREFIX)
 app.include_router(admin.router, prefix=API_PREFIX)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def admin_routes_look_nonexistent(
+    request: Request,
+    exc: StarletteHTTPException,
+) -> Response:
+    # A wrong method on a real path is a 405 (with an Allow header),
+    # which confirms the path exists. For the admin routes, answer
+    # exactly as an unknown path would. require_admin (deps.py) does
+    # the same for every other non-admin case.
+    if exc.status_code == 405 and (
+        request.url.path == ADMIN_PREFIX
+        or request.url.path.startswith(f"{ADMIN_PREFIX}/")
+    ):
+        exc = StarletteHTTPException(status_code=404, detail="Not Found")
+    return await http_exception_handler(request, exc)
 
 
 @app.exception_handler(RequestValidationError)

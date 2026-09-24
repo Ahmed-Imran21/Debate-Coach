@@ -7,9 +7,9 @@ import type { ReactElement } from "react";
 import {
   ApiError,
   getAccessToken,
-  getAdminStats,
   redirectToLoginAfterSessionExpiry,
 } from "@/lib/api";
+import { getAdminStats } from "./admin-api";
 import SiteHeader from "@/components/SiteHeader";
 import type { AdminStats } from "@/lib/types";
 
@@ -44,9 +44,11 @@ export default function AdminPage(): ReactElement {
         return;
       }
 
-      if (caught instanceof ApiError && caught.status === 403) {
-        // Cookie-gated by middleware already, but ADMIN_EMAILS
-        // could have changed between that check and this call.
+      // 404 is what the backend answers a non-admin (403 from a
+      // backend older than that change). Gated by middleware
+      // already, but ADMIN_EMAILS could change between that check
+      // and this call.
+      if (caught instanceof ApiError && (caught.status === 404 || caught.status === 403)) {
         router.replace("/");
         return;
       }

@@ -2,7 +2,7 @@ import uuid
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -25,8 +25,6 @@ from app.schemas.auth import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-ADMIN_SESSION_COOKIE = "dc_admin_session"
-
 # Same algorithm and cost as real hashes, of a random string nobody
 # knows. Checked against when the email doesn't exist so an unknown
 # email costs the same ~300ms bcrypt verify as a wrong password.
@@ -35,7 +33,6 @@ _TIMING_EQUALIZER_HASH = "$2b$12$Fj0fpUtj14hdPYxjNXhGvuqbLt4mcpRmYSxoPwX1CnQXJ6b
 
 def _tokens_for(
     user: User,
-    response: Response,
     session_start: int | None = None,
 ) -> TokenResponse:
     """
@@ -45,61 +42,14 @@ def _tokens_for(
     absolute session-lifetime cap be enforced independent of the
     per-token idle expiry, which resets on every reissue.
     """
-    access_token = create_access_token(str(user.id))
-    tokens = TokenResponse(
-        access_token=access_token,
+    # The /admin gate cookie is set by the frontend itself now
+    # (web/app/api/session/route.ts), on its own domain; a cookie set
+    # here could never reach it in production (*.run.app and
+    # *.vercel.app are both public suffixes).
+    return TokenResponse(
+        access_token=create_access_token(str(user.id)),
         refresh_token=create_refresh_token(str(user.id), session_start),
     )
-
-    # Admin-only, additive: the real session still lives in
-    # localStorage exactly as before (every existing API call is
-    # unaffected). This cookie exists purely so web/middleware.ts
-    # can gate /admin server-side — middleware has no access to
-    # localStorage. Not set for non-admin users, so a non-admin
-    # session carries no extra cookie at all.
-    #
-    # samesite="none" (not "lax"): production puts the frontend
-    # (Vercel) and this backend (Cloud Run) on genuinely different
-    # domains, not just different ports the way local dev is —
-    # "lax" gets silently dropped across a real cross-site set,
-    # the same failure mode as the missing credentials: "include"
-    # this cookie needed on the frontend fetch (see lib/api.ts).
-    # Unconditional rather than environment-branched: "none" is
-    # strictly less restrictive than "lax" (sent everywhere "lax"
-    # would send it, plus cross-site), so it already worked over
-    # plain http://localhost in local testing and needs no
-    # environment detection. Requires secure=True, already set.
-    # Safe to loosen here specifically because nothing server-side
-    # ever reads this cookie from the request — it's httpOnly and
-    # consumed only by middleware.ts, which reads it off the
-    # incoming same-origin browser request and re-sends it itself
-    # as a Bearer header; there's no request-forgery surface to
-    # protect against by keeping it site-restricted.
-    if user.email.lower() in settings.admin_emails_list:
-        response.set_cookie(
-            key=ADMIN_SESSION_COOKIE,
-            value=access_token,
-            httponly=True,
-            secure=True,
-            samesite="none",
-            max_age=settings.access_token_expire_minutes * 60,
-            path="/",
-        )
-    else:
-        # Covers the case where ADMIN_EMAILS changes and a
-        # previously-admin user logs in again post-demotion, or a
-        # non-admin signs in on a browser an admin just used. Must
-        # carry the same secure/samesite as set_cookie above: a
-        # SameSite=Lax clearing cookie on this cross-site response
-        # is dropped by the browser, leaving the old one in place.
-        response.delete_cookie(
-            ADMIN_SESSION_COOKIE,
-            path="/",
-            secure=True,
-            samesite="none",
-        )
-
-    return tokens
 
 
 @router.post(
@@ -109,7 +59,6 @@ def _tokens_for(
 )
 def signup(
     payload: SignupRequest,
-    response: Response,
     db: Session = Depends(get_db),
 ) -> TokenResponse:
 
@@ -138,13 +87,12 @@ def signup(
     db.commit()
     db.refresh(user)
 
-    return _tokens_for(user, response)
+    return _tokens_for(user)
 
 
 @router.post("/login", response_model=TokenResponse)
 def login(
     payload: LoginRequest,
-    response: Response,
     db: Session = Depends(get_db),
 ) -> TokenResponse:
 
@@ -167,13 +115,12 @@ def login(
             detail="Incorrect email or password.",
         )
 
-    return _tokens_for(user, response)
+    return _tokens_for(user)
 
 
 @router.post("/refresh", response_model=TokenResponse)
 def refresh(
     payload: RefreshRequest,
-    response: Response,
     db: Session = Depends(get_db),
 ) -> TokenResponse:
 
@@ -233,4 +180,4 @@ def refresh(
             detail="Your session has expired. Please log in again.",
         )
 
-    return _tokens_for(user, response, session_start=session_start)
+    return _tokens_for(user, session_start=session_start)

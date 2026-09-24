@@ -1,6 +1,5 @@
+import { tokenExpiresAt } from "./jwt";
 import type {
-  AdminStats,
-  AdminWhoAmI,
   SessionCreated,
   SessionReport,
   SessionSummary,
@@ -69,14 +68,132 @@ function getRefreshToken(): string | null {
   return window.localStorage.getItem(REFRESH_KEY);
 }
 
-export function storeTokens(tokens: Tokens): void {
+/**
+ * Every token change in the app goes through storeTokens() or
+ * clearTokens() — login, signup and refresh store; sign-out, session
+ * expiry, a failed refresh and account deletion clear. Both keep the
+ * first-party gate cookie (app/api/session/route.ts) in step, so no
+ * individual call site can forget to.
+ */
+export function storeTokens(tokens: Tokens): Promise<void> {
   window.localStorage.setItem(ACCESS_KEY, tokens.access_token);
   window.localStorage.setItem(REFRESH_KEY, tokens.refresh_token);
+  return syncServerSession(tokens.access_token).then(() => undefined);
 }
 
 export function clearTokens(): void {
   window.localStorage.removeItem(ACCESS_KEY);
   window.localStorage.removeItem(REFRESH_KEY);
+  sessionSync = null;
+  forgetSync();
+  // keepalive: callers navigate away immediately after this.
+  void fetch("/api/session", { method: "DELETE", keepalive: true }).catch(() => {});
+}
+
+/* ---------------------------------------------------------- */
+/* Server session (first-party gate cookie)                    */
+/* ---------------------------------------------------------- */
+
+export interface AdminLink {
+  href: string;
+  label: string;
+}
+
+interface SessionInfo {
+  adminLink?: AdminLink;
+}
+
+const SYNC_KEY = "dc.session-sync";
+
+let sessionSync: { token: string; promise: Promise<SessionInfo> } | null = null;
+
+// A token's signature is unique to it; enough to key the memo on
+// without keeping a second copy of the whole token around.
+function tokenKey(token: string): string {
+  return token.slice(-24);
+}
+
+// Remembered per tab across reloads, so a signed-in visitor syncs
+// once per access token (hourly), not once per page load.
+function recallSync(token: string): SessionInfo | null {
+  try {
+    const stored = JSON.parse(window.sessionStorage.getItem(SYNC_KEY) ?? "null");
+    return stored?.key === tokenKey(token) ? (stored.info as SessionInfo) : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberSync(token: string, info: SessionInfo): void {
+  try {
+    window.sessionStorage.setItem(SYNC_KEY, JSON.stringify({ key: tokenKey(token), info }));
+  } catch {
+    // Storage unavailable: the next page load just syncs again.
+  }
+}
+
+function forgetSync(): void {
+  try {
+    window.sessionStorage.removeItem(SYNC_KEY);
+  } catch {
+    // Nothing to forget.
+  }
+}
+
+function syncServerSession(accessToken: string): Promise<SessionInfo> {
+  const promise: Promise<SessionInfo> = fetch("/api/session", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: timeoutSignal(DEFAULT_TIMEOUT_MS),
+  })
+    .then((response) => (response.ok ? response.json() : {}))
+    .catch(() => ({}))
+    .then((info: SessionInfo) => {
+      rememberSync(accessToken, info);
+      return info;
+    });
+
+  sessionSync = { token: accessToken, promise };
+  return promise;
+}
+
+/**
+ * Called on every page load (components/Heartbeat.tsx) to cover a
+ * session that predates this tab — signed in before this code
+ * shipped, or whose cookie expired with its access token. Safe to
+ * call repeatedly: concurrent callers share one request, and a token
+ * that was already synced in this tab isn't synced again.
+ */
+export function ensureServerSession(): Promise<SessionInfo> {
+  const token = getAccessToken();
+  if (!token) return Promise.resolve({});
+
+  if (sessionSync?.token === token) return sessionSync.promise;
+
+  const remembered = recallSync(token);
+  if (remembered) {
+    sessionSync = { token, promise: Promise.resolve(remembered) };
+    return sessionSync.promise;
+  }
+
+  const expiresAt = tokenExpiresAt(token);
+  if (expiresAt !== null && expiresAt <= Date.now()) {
+    // Refresh first; its storeTokens() syncs the new token. Keyed on
+    // the old token so a second caller shares this, not a 2nd refresh.
+    const promise = refreshTokens().then((): Promise<SessionInfo> | SessionInfo => {
+      const fresh = getAccessToken();
+      return fresh && sessionSync?.token === fresh ? sessionSync.promise : {};
+    });
+    sessionSync = { token, promise };
+    return promise;
+  }
+
+  return syncServerSession(token);
+}
+
+/** The header's admin link, or null. Only ever set for an admin. */
+export function getAdminLink(): Promise<AdminLink | null> {
+  return ensureServerSession().then((info) => info.adminLink ?? null);
 }
 
 /**
@@ -142,15 +259,6 @@ async function refreshTokens(): Promise<boolean> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refresh_token: refresh }),
-      // localhost:3000 and the API origin are different ports, so
-      // different origins — without this, the browser silently
-      // discards this response's Set-Cookie (app/routes/auth.py's
-      // admin-only dc_admin_session), same reasoning as login/signup
-      // below. Needed here too: an admin session left open past the
-      // access token's expiry refreshes through this path, and
-      // without a fresh Set-Cookie each time, the admin cookie would
-      // just expire on its own original schedule and never renew.
-      credentials: "include",
       signal: timeoutSignal(DEFAULT_TIMEOUT_MS),
     });
   } catch {
@@ -168,7 +276,7 @@ async function refreshTokens(): Promise<boolean> {
     return false;
   }
 
-  storeTokens((await response.json()) as Tokens);
+  await storeTokens((await response.json()) as Tokens);
   return true;
 }
 
@@ -185,23 +293,13 @@ interface RequestOptions {
   headers?: Record<string, string>;
   auth?: boolean;
   retryOnAuthFailure?: boolean;
-  /**
-   * "include" only where the response can carry a cross-origin
-   * Set-Cookie the browser actually needs to keep — today that's
-   * just signup/login (dc_admin_session, admin-only; see
-   * app/routes/auth.py). Left unset (browser default
-   * "same-origin") everywhere else: no other endpoint sets or
-   * reads that cookie, so there's nothing for other calls to gain
-   * from sending/receiving credentials cross-origin.
-   */
-  credentials?: RequestCredentials;
   /** Overrides DEFAULT_TIMEOUT_MS. Not used by any caller today —
    * present so a genuinely slow endpoint can opt into a longer
    * window without changing the default every other call gets. */
   timeoutMs?: number;
 }
 
-async function request<T>(
+export async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
@@ -212,7 +310,6 @@ async function request<T>(
     headers: extraHeaders,
     auth = true,
     retryOnAuthFailure = true,
-    credentials,
     timeoutMs = DEFAULT_TIMEOUT_MS,
   } = options;
 
@@ -234,7 +331,6 @@ async function request<T>(
       method,
       headers,
       body: rawBody !== undefined ? rawBody : body === undefined ? undefined : JSON.stringify(body),
-      ...(credentials ? { credentials } : {}),
       signal: timeoutSignal(timeoutMs),
     });
   } catch (caught) {
@@ -284,10 +380,9 @@ export async function signup(input: {
     method: "POST",
     body: input,
     auth: false,
-    credentials: "include",
   });
 
-  storeTokens(tokens);
+  await storeTokens(tokens);
   return tokens;
 }
 
@@ -299,10 +394,9 @@ export async function login(input: {
     method: "POST",
     body: input,
     auth: false,
-    credentials: "include",
   });
 
-  storeTokens(tokens);
+  await storeTokens(tokens);
   return tokens;
 }
 
@@ -349,55 +443,6 @@ export function heartbeat(): Promise<void> {
     method: "POST",
     retryOnAuthFailure: false,
   });
-}
-
-/* ---------------------------------------------------------- */
-/* Admin                                                        */
-/* ---------------------------------------------------------- */
-
-export function getAdminStats(): Promise<AdminStats> {
-  return request<AdminStats>("/v1/admin/stats");
-}
-
-let adminCheckToken: string | null = null;
-let adminCheckPromise: Promise<boolean> | null = null;
-
-/**
- * Whether the signed-in user is an admin, for the SiteHeader link
- * only — never trust this for anything that actually needs
- * protecting; every real /admin/* route still enforces
- * require_admin server-side regardless of what this returns.
- *
- * Memoized per access token, not per call site: SiteHeader
- * re-mounts on every page (it's rendered per-page, not once in
- * the root layout), so without this a signed-in visitor would
- * hit GET /v1/admin/whoami on every navigation. The token itself
- * is the cache key, so a token refresh or a different user
- * signing in the same tab correctly triggers one fresh check,
- * not a stale cached answer for the wrong account. Resolves to
- * false (never throws) for a signed-out visitor, a non-admin
- * (403), or any network failure — SiteHeader has one thing to
- * do with the result either way: not render the link.
- */
-export function isCurrentUserAdmin(): Promise<boolean> {
-  const token = getAccessToken();
-
-  if (!token) {
-    adminCheckToken = null;
-    adminCheckPromise = null;
-    return Promise.resolve(false);
-  }
-
-  if (adminCheckPromise && adminCheckToken === token) {
-    return adminCheckPromise;
-  }
-
-  adminCheckToken = token;
-  adminCheckPromise = request<AdminWhoAmI>("/v1/admin/whoami")
-    .then(() => true)
-    .catch(() => false);
-
-  return adminCheckPromise;
 }
 
 /* ---------------------------------------------------------- */

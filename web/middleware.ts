@@ -1,68 +1,54 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { ADMIN_LINK, GATE_COOKIE, isAdminToken } from "./lib/admin-gate";
+
 /**
- * Server-side gate for /admin. This is the piece that runs
- * before any /admin page renders — the backend's require_admin
- * (app/routes/deps.py) is the actual security boundary (every
- * /admin/* route 403s a non-admin regardless of this file), but
- * that alone would still let a non-admin's browser download and
- * run the page's own JS before finding out. This stops that.
+ * Server-side gate for /admin. The backend's require_admin is the
+ * real security boundary (every /v1/admin route answers a plain 404
+ * to anyone else); this keeps a non-admin from ever receiving the
+ * admin page or learning it exists.
  *
- * Can't use the normal localStorage-based session (lib/api.ts)
- * here — middleware runs on the server, localStorage doesn't
- * exist there. Reads the httpOnly admin-only cookie
- * app/routes/auth.py sets on login/signup instead (never set at
- * all for a non-admin user) and asks the backend whether it's
- * actually valid, rather than trusting the cookie's mere
- * presence — a cookie that's expired, been revoked by an
- * ADMIN_EMAILS change since it was issued, or is simply wrong
- * must not pass.
+ * Reads the first-party gate cookie app/api/session/route.ts sets,
+ * then re-checks it with the backend on every request rather than
+ * trusting its presence — so an expired token, or an account since
+ * removed from ADMIN_EMAILS, is turned away immediately.
  *
- * A bare 404 on failure, not a redirect: a redirect confirms to
- * a curious non-admin that *something* lives at this path. A 404
- * makes /admin indistinguishable from a route that was never
- * built.
+ * Refusal is a rewrite to a path that doesn't exist, so the response
+ * is the app's ordinary not-found page: same status and byte-for-byte
+ * body as any unknown URL. A bare 404 or a redirect would each be
+ * distinguishable. (`next start` also adds an x-middleware-rewrite
+ * header; a gate in app/admin/layout.tsx calling notFound() was tried
+ * instead and differs far more — body, headers, and a reference to
+ * the admin chunk.)
  */
 
-const ADMIN_SESSION_COOKIE = "dc_admin_session";
+const NOT_FOUND_PATH = "/__not-found";
 
-const API_ORIGIN = (
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
-).replace(/\/$/, "");
-
-function notFound(): NextResponse {
-  return new NextResponse(null, { status: 404 });
+function isAdminPath(pathname: string): boolean {
+  const base = ADMIN_LINK.href;
+  // "/admin.rsc" and similar are the same page's alternate payloads.
+  return pathname === base || pathname.startsWith(`${base}/`) || pathname.startsWith(`${base}.`);
 }
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
-  const token = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
-
-  if (!token) {
-    return notFound();
+  if (!isAdminPath(request.nextUrl.pathname)) {
+    return NextResponse.next();
   }
 
-  let response: Response;
+  const token = request.cookies.get(GATE_COOKIE)?.value;
 
-  try {
-    response = await fetch(`${API_ORIGIN}/v1/admin/whoami`, {
-      headers: { Authorization: `Bearer ${token}` },
-      // This check must reflect the current admin list on every
-      // request, not a stale edge/browser cache of a 200 from
-      // an account later removed from ADMIN_EMAILS.
-      cache: "no-store",
-    });
-  } catch {
-    // Backend unreachable: fail closed, not open.
-    return notFound();
+  if (token && (await isAdminToken(token))) {
+    return NextResponse.next();
   }
 
-  if (!response.ok) {
-    return notFound();
-  }
-
-  return NextResponse.next();
+  return NextResponse.rewrite(new URL(NOT_FOUND_PATH, request.url));
 }
 
+// Deliberately generic: Next.js copies this matcher into its public
+// client runtime (window.__MIDDLEWARE_MATCHERS), so "/admin/:path*"
+// here would name the admin page to every visitor. The real check is
+// isAdminPath() above, which stays server-side. Every other path
+// returns immediately, with no backend call.
 export const config = {
-  matcher: "/admin/:path*",
+  matcher: "/((?!_next/static|_next/image).*)",
 };
