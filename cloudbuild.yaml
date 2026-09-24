@@ -21,6 +21,9 @@ substitutions:
   _REPOSITORY: debate-coach
   _CLOUD_SQL_INSTANCE: debate-coach-508804:us-central1:debate-coach-db
   _ENV_VARS_FILE: .env.production
+  # e.g. "--no-traffic --tag=verify" to smoke-test a revision on
+  # its own tag URL before it takes production traffic.
+  _EXTRA_DEPLOY_FLAGS: ""
 
 steps:
   # --- Build ---
@@ -76,6 +79,7 @@ steps:
           --platform managed \
           --add-cloudsql-instances ${_CLOUD_SQL_INSTANCE} \
           $$DEPLOY_ENV_FLAG \
+          ${_EXTRA_DEPLOY_FLAGS} \
           --allow-unauthenticated \
           --memory 2Gi \
           --cpu 2 \

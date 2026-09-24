@@ -89,8 +89,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # Exactly what web/ sends; "*" alongside allow_credentials
+    # would echo back any method/header a page asks for.
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type", "Content-Encoding"],
 )
 
 app.add_middleware(

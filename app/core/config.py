@@ -107,9 +107,11 @@ class Settings(BaseSettings):
     # app/core/rate_limit.py.
     request_rate_limit_per_minute: int = 60
 
-    # Set to true when running behind a proxy or load balancer
-    # that sets X-Forwarded-For. Leave false otherwise, or a
-    # client can spoof its own rate-limit bucket.
+    # Must be true on Cloud Run: without it every request appears
+    # to come from the front end's own address, so all users share
+    # one rate-limit bucket. Leave false when nothing in front of
+    # the app appends X-Forwarded-For, or a client can pick its
+    # own bucket.
     trust_forwarded_for: bool = False
 
     @property
