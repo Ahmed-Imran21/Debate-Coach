@@ -484,3 +484,23 @@ export interface AdminStats {
   keys: KeyUsage[];
   storage: StorageUsage;
 }
+
+export type AdminUserSort = "newest" | "last_seen";
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  created_at: string;
+  last_seen_at: string | null;
+  session_count: number;
+  /** In ADMIN_EMAILS: the backend refuses to force-delete these. */
+  is_admin: boolean;
+}
+
+export interface AdminUserPage {
+  users: AdminUser[];
+  /** Pass back as `cursor` for the next page; null on the last page. */
+  next_cursor: string | null;
+}

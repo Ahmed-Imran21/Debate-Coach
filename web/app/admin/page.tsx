@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ReactElement } from "react";
@@ -89,9 +90,21 @@ export default function AdminPage(): ReactElement {
       <main>
         <section className="block-tight" style={{ paddingTop: "2.5rem" }}>
           <div className="wrap">
-            <h1 style={{ fontSize: "var(--step-4)", marginBottom: "1.5rem" }}>
-              Admin
-            </h1>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "baseline",
+                gap: "1rem",
+                flexWrap: "wrap",
+                marginBottom: "1.5rem",
+              }}
+            >
+              <h1 style={{ fontSize: "var(--step-4)" }}>Admin</h1>
+              <Link className="btn btn-quiet btn-sm" href="/admin/users">
+                Manage users
+              </Link>
+            </div>
 
             {error && (
               <p className="alert alert-quiet" role="status">
