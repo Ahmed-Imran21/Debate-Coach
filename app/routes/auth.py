@@ -25,6 +25,11 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 ADMIN_SESSION_COOKIE = "dc_admin_session"
 
+# Same algorithm and cost as real hashes, of a random string nobody
+# knows. Checked against when the email doesn't exist so an unknown
+# email costs the same ~300ms bcrypt verify as a wrong password.
+_TIMING_EQUALIZER_HASH = "$2b$12$Fj0fpUtj14hdPYxjNXhGvuqbLt4mcpRmYSxoPwX1CnQXJ6bvMBGmu"
+
 
 def _tokens_for(user: User, response: Response) -> TokenResponse:
     access_token = create_access_token(str(user.id))
@@ -129,10 +134,12 @@ def login(
         .first()
     )
 
-    if user is None or not verify_password(
+    password_ok = verify_password(
         payload.password,
-        user.password_hash,
-    ):
+        user.password_hash if user is not None else _TIMING_EQUALIZER_HASH,
+    )
+
+    if user is None or not password_ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password.",
