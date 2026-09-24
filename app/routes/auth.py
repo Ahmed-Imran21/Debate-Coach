@@ -87,8 +87,17 @@ def _tokens_for(
         )
     else:
         # Covers the case where ADMIN_EMAILS changes and a
-        # previously-admin user logs in again post-demotion.
-        response.delete_cookie(ADMIN_SESSION_COOKIE, path="/")
+        # previously-admin user logs in again post-demotion, or a
+        # non-admin signs in on a browser an admin just used. Must
+        # carry the same secure/samesite as set_cookie above: a
+        # SameSite=Lax clearing cookie on this cross-site response
+        # is dropped by the browser, leaving the old one in place.
+        response.delete_cookie(
+            ADMIN_SESSION_COOKIE,
+            path="/",
+            secure=True,
+            samesite="none",
+        )
 
     return tokens
 
