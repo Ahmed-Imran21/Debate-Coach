@@ -1,3 +1,4 @@
+import logging
 import time
 
 from collections import defaultdict, deque
@@ -6,6 +7,9 @@ from typing import Deque, Dict
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+
+logger = logging.getLogger(__name__)
 
 
 class PerClientRateLimitMiddleware(BaseHTTPMiddleware):
@@ -54,8 +58,14 @@ class PerClientRateLimitMiddleware(BaseHTTPMiddleware):
 
             forwarded = request.headers.get("x-forwarded-for")
 
+            # The last entry, not the first: Cloud Run's front end
+            # appends the address it actually received the
+            # connection from, while everything before it is
+            # whatever the client chose to send.
             if forwarded:
-                return forwarded.split(",")[0].strip()
+                last = forwarded.rsplit(",", 1)[-1].strip()
+                if last:
+                    return last
 
         if request.client is not None:
             return request.client.host
@@ -106,7 +116,8 @@ class PerClientRateLimitMiddleware(BaseHTTPMiddleware):
 
         self._sweep(now)
 
-        hits = self._hits[self._client_key(request)]
+        client_key = self._client_key(request)
+        hits = self._hits[client_key]
 
         while hits and hits[0] < window_start:
             hits.popleft()
@@ -114,6 +125,13 @@ class PerClientRateLimitMiddleware(BaseHTTPMiddleware):
         if len(hits) >= self._max:
 
             retry_after = max(1, int(60 - (now - hits[0])))
+
+            logger.warning(
+                "Rate limit exceeded for client %s on %s %s",
+                client_key,
+                request.method,
+                request.url.path,
+            )
 
             return JSONResponse(
                 status_code=429,

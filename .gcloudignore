@@ -17,3 +17,15 @@ node_modules/
 web/node_modules/
 web/.next/
 .next/
+
+# Local secrets and personal data. Every upload lands in the
+# project's _cloudbuild bucket and stays there; none of this is
+# copied into the image anyway (see the Dockerfile's COPY list).
+.env
+.env.*
+!.env.production
+web/
+sessions/
+sessions copy/
+.pytest_cache/
+.vscode/
