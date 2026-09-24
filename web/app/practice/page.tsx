@@ -15,6 +15,7 @@ import {
   deleteSession,
   getAccessToken,
   listSessions,
+  redirectToLoginAfterSessionExpiry,
 } from "@/lib/api";
 import {
   STATUS_LABEL,
@@ -49,8 +50,7 @@ export default function PracticePage(): ReactElement {
       if (leftPageRef.current) return false;
 
       if (caught instanceof ApiError && caught.status === 401) {
-        clearTokens();
-        router.replace("/login");
+        redirectToLoginAfterSessionExpiry(router);
         return false;
       }
 

@@ -1,5 +1,7 @@
 import uuid
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
@@ -31,11 +33,22 @@ ADMIN_SESSION_COOKIE = "dc_admin_session"
 _TIMING_EQUALIZER_HASH = "$2b$12$Fj0fpUtj14hdPYxjNXhGvuqbLt4mcpRmYSxoPwX1CnQXJ6bvMBGmu"
 
 
-def _tokens_for(user: User, response: Response) -> TokenResponse:
+def _tokens_for(
+    user: User,
+    response: Response,
+    session_start: int | None = None,
+) -> TokenResponse:
+    """
+    session_start: None for signup/login (a brand-new session);
+    the original session's start time, carried through unchanged,
+    for a refresh (see refresh() below) — that's what lets the
+    absolute session-lifetime cap be enforced independent of the
+    per-token idle expiry, which resets on every reissue.
+    """
     access_token = create_access_token(str(user.id))
     tokens = TokenResponse(
         access_token=access_token,
-        refresh_token=create_refresh_token(str(user.id)),
+        refresh_token=create_refresh_token(str(user.id), session_start),
     )
 
     # Admin-only, additive: the real session still lives in
@@ -190,4 +203,25 @@ def refresh(
             detail="User not found",
         )
 
-    return _tokens_for(user, response)
+    # Absolute session lifetime: the per-token "exp" jose already
+    # checked above (via decode_token) only enforces an idle
+    # timeout, because every reissue resets it to a fresh
+    # refresh_token_expire_days from now — a session refreshed
+    # regularly would otherwise never actually end. session_start
+    # is never reset, so it's what lets a continuously-active
+    # session still be forced to a real login eventually. Falls
+    # back to this token's own "iat" for a refresh token minted
+    # before this claim existed, which is exactly the right value:
+    # that token's actual issue time.
+    session_start = decoded.get("session_start", decoded.get("iat"))
+    session_age = datetime.now(timezone.utc) - datetime.fromtimestamp(
+        session_start, tz=timezone.utc
+    )
+
+    if session_age > timedelta(days=settings.refresh_token_expire_days):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Your session has expired. Please log in again.",
+        )
+
+    return _tokens_for(user, response, session_start=session_start)

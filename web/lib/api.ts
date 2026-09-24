@@ -47,6 +47,26 @@ export function clearTokens(): void {
   window.localStorage.removeItem(REFRESH_KEY);
 }
 
+/**
+ * The one place every page's 401 handler should route through
+ * (see practice/page.tsx, practice/[id]/page.tsx, admin/page.tsx).
+ * clearTokens() is already called by refreshTokens() on failure,
+ * but repeating it here is cheap and keeps this function correct
+ * standalone. "reason=expired" is read by app/login/page.tsx to
+ * show a fixed, friendly message — never the raw backend response
+ * text, which for a dead refresh token is a bare "Invalid refresh
+ * token"/401 that would mean nothing to someone who did nothing
+ * wrong. Query param, not global state: two tabs hitting this at
+ * once both just navigate to the same URL, and /login itself never
+ * makes an auth:true call, so this can't loop back into itself.
+ */
+export function redirectToLoginAfterSessionExpiry(router: {
+  replace: (href: string) => void;
+}): void {
+  clearTokens();
+  router.replace("/login?reason=expired");
+}
+
 export class ApiError extends Error {
   status: number;
 
@@ -233,7 +253,19 @@ export function getCurrentUser(): Promise<User> {
  * surfacing to the user.
  */
 export function heartbeat(): Promise<void> {
-  return request<void>("/v1/users/heartbeat", { method: "POST" });
+  // retryOnAuthFailure: false — heartbeat fires on a timer with no
+  // real user interaction behind it (Heartbeat.tsx), so letting a
+  // dead access token silently refresh here would mean a tab left
+  // open and forgotten keeps the session alive forever: the
+  // refresh token's idle timeout can never be reached as long as
+  // *something* is pinging every 60s. A genuine user action (a
+  // real page load, a real API call from something the user is
+  // actually doing) still refreshes normally through the default
+  // path elsewhere in this file.
+  return request<void>("/v1/users/heartbeat", {
+    method: "POST",
+    retryOnAuthFailure: false,
+  });
 }
 
 /* ---------------------------------------------------------- */
