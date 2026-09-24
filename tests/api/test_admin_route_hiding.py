@@ -7,7 +7,7 @@ docs, which list every route, are off unless explicitly enabled.
 
 import pytest
 
-ADMIN_PATHS = ["/v1/admin/whoami", "/v1/admin/stats"]
+ADMIN_PATHS = ["/v1/admin/whoami", "/v1/admin/stats", "/v1/admin/users"]
 UNKNOWN_PATH = "/v1/definitely-not-a-route"
 REVEALING_HEADERS = ("allow", "www-authenticate", "location")
 
@@ -64,6 +64,55 @@ def test_every_non_admin_probe_matches_an_unknown_path(api, make_user, admin_pat
         fake = client.request(method, UNKNOWN_PATH + suffix, headers=headers)
         assert _fingerprint(real) == _fingerprint(fake), label
         assert real.status_code == 404, label
+
+
+@pytest.mark.parametrize(
+    "method, admin_path, unknown_path",
+    [
+        # Malformed parameters must not surface as a 422 that proves the
+        # route exists: require_admin answers before they're validated.
+        ("GET", "/v1/admin/users?limit=abc&sort=bogus&cursor=%25%25", UNKNOWN_PATH + "?limit=abc&sort=bogus&cursor=%25%25"),
+        ("GET", "/v1/admin/users?search=" + "x" * 500, UNKNOWN_PATH + "?search=" + "x" * 500),
+        ("DELETE", "/v1/admin/users/00000000-0000-0000-0000-000000000000", UNKNOWN_PATH + "/00000000-0000-0000-0000-000000000000"),
+        ("DELETE", "/v1/admin/users/not-a-uuid", UNKNOWN_PATH + "/not-a-uuid"),
+        ("GET", "/v1/admin/users/00000000-0000-0000-0000-000000000000", UNKNOWN_PATH + "/00000000-0000-0000-0000-000000000000"),
+    ],
+)
+def test_user_management_routes_match_an_unknown_path_for_non_admins(api, make_user, method, admin_path, unknown_path):
+    client, bearer = api
+    for headers in ({}, {"Authorization": "Bearer not-a-jwt"}, bearer(make_user("someone@test.com"))):
+        real = client.request(method, admin_path, headers=headers)
+        fake = client.request(method, unknown_path, headers=headers)
+        assert _fingerprint(real) == _fingerprint(fake), (method, admin_path, headers)
+        assert real.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"json": {"password": "guess"}},
+        {"json": {}},
+        {"content": b"{not json", "headers": {"content-type": "application/json"}},
+        {"content": b"password=x", "headers": {"content-type": "application/x-www-form-urlencoded"}},
+    ],
+)
+def test_force_delete_body_never_reveals_the_route_to_non_admins(api, make_user, body):
+    """
+    The delete takes a password body. FastAPI parses a declared body
+    before any dependency runs, so malformed JSON would 422 ahead of
+    require_admin's 404; the route reads its body only after the admin
+    check instead. Every body shape must look like a nonexistent path.
+    """
+    client, bearer = api
+    target = "00000000-0000-0000-0000-000000000000"
+    for auth in ({}, {"Authorization": "Bearer not-a-jwt"}, bearer(make_user("someone@test.com"))):
+        kwargs = dict(body)
+        headers = {**auth, **kwargs.pop("headers", {})}
+        real = client.request("DELETE", f"/v1/admin/users/{target}", headers=headers, **kwargs)
+        fake = client.request("DELETE", f"{UNKNOWN_PATH}/{target}", headers=headers, **kwargs)
+        assert _fingerprint(real) == _fingerprint(fake), (body, auth)
+        assert real.status_code == 404
 
 
 def test_admin_still_gets_through(api, make_user):
