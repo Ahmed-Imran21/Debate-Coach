@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 
+import DeleteAccountModal from "@/components/DeleteAccountModal";
 import Recorder from "@/components/Recorder";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
@@ -30,6 +31,7 @@ export default function PracticePage(): ReactElement {
 
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // A poll can still be in flight when the user navigates away, and
@@ -113,10 +115,25 @@ export default function PracticePage(): ReactElement {
               }}
             >
               <h1 style={{ fontSize: "var(--step-4)" }}>Practice</h1>
-              <button className="filter" type="button" onClick={signOut}>
-                Sign out
-              </button>
+              <div className="btn-row">
+                <button
+                  className="btn btn-quiet btn-sm"
+                  type="button"
+                  data-tone="danger"
+                  onClick={() => setDeleteModalOpen(true)}
+                >
+                  Delete account
+                </button>
+                <button className="filter" type="button" onClick={signOut}>
+                  Sign out
+                </button>
+              </div>
             </div>
+
+            <DeleteAccountModal
+              open={deleteModalOpen}
+              onClose={() => setDeleteModalOpen(false)}
+            />
 
             <div style={{ maxWidth: "34rem" }}>
               <Recorder />

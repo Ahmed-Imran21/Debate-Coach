@@ -244,6 +244,22 @@ export function getCurrentUser(): Promise<User> {
 }
 
 /**
+ * Permanently deletes the signed-in account: every session, every
+ * stored recording/transcript/report, everything. The backend
+ * re-checks the password itself (app/routes/users.py) — this
+ * function carries it, but it is not what authorizes the delete.
+ * Throws ApiError(401, "Incorrect password.") on a wrong password;
+ * the caller is expected to keep its confirmation UI open and show
+ * that, not just retry or redirect.
+ */
+export function deleteAccount(password: string): Promise<void> {
+  return request<void>("/v1/users/me", {
+    method: "DELETE",
+    body: { password },
+  });
+}
+
+/**
  * Fallback for LastSeenMiddleware (app/core/last_seen.py), which
  * only fires on requests that hit some other endpoint. Called on
  * an interval while a signed-in tab is open — see
