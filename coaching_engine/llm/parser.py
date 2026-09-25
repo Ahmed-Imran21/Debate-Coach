@@ -113,4 +113,8 @@ def parse_synthesis_response(
         if isinstance(rubric_data[c].get("reason"), str)
     }
 
+    opposing_view = rubric_data["rebuttal"].get("opposing_view")
+    if isinstance(opposing_view, str) and opposing_view.strip():
+        reasons["rebuttal_opposing_view"] = opposing_view.strip()
+
     return items, levels, reasons

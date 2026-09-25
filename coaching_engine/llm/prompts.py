@@ -1,5 +1,6 @@
 import json
-from typing import Any, Dict
+import re
+from typing import Any, Dict, List
 
 
 CONTENT_CATEGORIES = (
@@ -76,10 +77,27 @@ Calibration:
   category by one level, not to the bottom.
 - Brevity alone is not a flaw: a short speech that makes a clear,
   reasoned point can reach level 3 or 4.
-- Rebuttal: if the speech has no opposing argument to respond to (for
-  example an opening speech), set its level to "{NOT_APPLICABLE}". Do
-  not penalise a speaker for not rebutting something that was never
-  raised. If the speaker does engage an opposing view, score it.
+- Rebuttal: decide from the transcript text itself, not only the
+  labels. The labels can miss a rebuttal, and a single sentence can be
+  split across segments, so read neighbouring segments together.
+  Before choosing "{NOT_APPLICABLE}", check every segment for:
+  a reference to the other side ("opponents", "proponents", "critics",
+  "they say", "some argue"); a concession; or a contrast ("but",
+  "however", "yet") that answers another view. If you find any of
+  these, the speaker engaged an opposing view: score rebuttal 1-5 on
+  how well they answered it, even if it is only one sentence.
+- Fill rubric.rebuttal.opposing_view first: the exact words from the
+  speech where it refers to or answers another side, or "" if there
+  are none. If it is not empty, rebuttal is applicable and must be
+  scored 1-5.
+- Use "{NOT_APPLICABLE}" only when the speech never refers to any
+  opposing view at all, for example an opening speech that only
+  builds its own case. Do not penalise a speaker for not rebutting
+  something that was never raised.
+- Keep the feedback consistent with the rubric: if rebuttal is
+  "{NOT_APPLICABLE}", write no feedback item saying the speaker failed
+  to rebut or engage the other side; if you do write one, rebuttal is
+  applicable and must be scored.
 - Judge the quality of the argument, not whether you agree with the
   position.
 - "{NOT_APPLICABLE}" is valid for rebuttal only.
@@ -87,6 +105,31 @@ Calibration:
 Return only the JSON object requested, with no prose and no
 markdown fences.
 """
+
+
+def _rubric_entry(category: str) -> Dict[str, Any]:
+    if category != "rebuttal":
+        return {
+            "type": "object",
+            "properties": {"level": {"enum": [1, 2, 3, 4, 5]}, "reason": {"type": "string"}},
+            "required": ["level", "reason"],
+            "additionalProperties": False,
+        }
+
+    # opposing_view comes before level on purpose: the model has to
+    # search the transcript and quote what it found before it can
+    # decide. Asked for only a level, it marked a speech that opens a
+    # sentence with "Proponents promise..." as having nothing to rebut.
+    return {
+        "type": "object",
+        "properties": {
+            "opposing_view": {"type": "string"},
+            "level": {"enum": [1, 2, 3, 4, 5, NOT_APPLICABLE]},
+            "reason": {"type": "string"},
+        },
+        "required": ["opposing_view", "level", "reason"],
+        "additionalProperties": False,
+    }
 
 
 SYNTHESIS_RESPONSE_SCHEMA = {
@@ -126,22 +169,7 @@ SYNTHESIS_RESPONSE_SCHEMA = {
         },
         "rubric": {
             "type": "object",
-            "properties": {
-                category: {
-                    "type": "object",
-                    "properties": {
-                        "level": (
-                            {"enum": [1, 2, 3, 4, 5, NOT_APPLICABLE]}
-                            if category == "rebuttal"
-                            else {"enum": [1, 2, 3, 4, 5]}
-                        ),
-                        "reason": {"type": "string"},
-                    },
-                    "required": ["level", "reason"],
-                    "additionalProperties": False,
-                }
-                for category in CONTENT_CATEGORIES
-            },
+            "properties": {category: _rubric_entry(category) for category in CONTENT_CATEGORIES},
             "required": list(CONTENT_CATEGORIES),
             "additionalProperties": False,
         },
@@ -159,6 +187,37 @@ def build_synthesis_system_prompt() -> str:
     )
 
 
+# Words that name the other side. Found in Python, not left to the
+# model: asked to look for them itself, it marked a speech containing
+# "Proponents promise vague long technological spillovers but..." as
+# having nothing to rebut in six of six runs. Bare "but"/"however"
+# are deliberately not here: almost every speech uses them, opening
+# speeches included.
+_OTHER_SIDE = re.compile(
+    r"\b(proponents?|opponents?|the opposition|opposing side|other side|critics?|"
+    r"detractors?|skeptics?|sceptics?|naysayers?|"
+    r"(they|some|others|many|people|some people) (?:also |often |will |might |would )?(say|said|claim|argue|believe|think|will say|might say|would say)|"
+    r"those who (say|claim|argue|believe|think))\b",
+    re.IGNORECASE,
+)
+
+
+def find_other_side_references(speech_content: Dict[str, Any]) -> List[str]:
+    """
+    Segments whose text names an opposing side. Each is joined with
+    the next segment, since transcription can split one sentence
+    across two.
+    """
+
+    segments = [str(s.get("text", "")).strip() for s in speech_content.get("segments") or []]
+    found = []
+    for index, text in enumerate(segments):
+        if _OTHER_SIDE.search(text):
+            following = segments[index + 1] if index + 1 < len(segments) else ""
+            found.append(f"{text} {following}".strip())
+    return found
+
+
 def build_synthesis_prompt(speech_content: Dict[str, Any]) -> str:
     """
     The whole speech, once. Only the labelled segments go in: no raw
@@ -171,9 +230,19 @@ def build_synthesis_prompt(speech_content: Dict[str, Any]) -> str:
 
     speech_json = json.dumps(speech_content, indent=2, ensure_ascii=False)
 
+    other_side = find_other_side_references(speech_content)
+    rebuttal_note = (
+        "\nThese passages name an opposing side, so rebuttal is applicable "
+        "and must be scored 1-5 on how well the speaker answers them:\n"
+        + "\n".join(f'- "{passage}"' for passage in other_side)
+        + "\n"
+        if other_side
+        else ""
+    )
+
     return f"""
 Review this practice speech. Give {MIN_CONTENT_ITEMS}-{MAX_CONTENT_ITEMS} synthesized feedback items and a rubric level for each of: {", ".join(CONTENT_CATEGORIES)}.
-
+{rebuttal_note}
 SPEECH (labelled segments):
 {speech_json}
 """

@@ -248,3 +248,70 @@ def test_report_schema_accepts_a_null_rebuttal_score():
         audio_url=None,
     )
     assert report.model_dump(mode="json")["scores"]["rebuttal"] is None
+
+
+# ---------------------------------------------------------------
+# Rebuttal applicability
+# ---------------------------------------------------------------
+
+def speech(*texts):
+    return {"session_id": "s", "segments": [{"text": t, "labels": ["claim"]} for t in texts]}
+
+
+def test_references_to_the_other_side_are_found_and_joined_with_the_next_segment():
+    from coaching_engine.llm.prompts import find_other_side_references
+
+    found = find_other_side_references(speech(
+        "Space is a waste.",
+        "Proponents promise vague long technological spillovers but our planetary",
+        "emergencies are happening right now.",
+        "They also say parents want to see the work.",
+    ))
+    assert found == [
+        "Proponents promise vague long technological spillovers but our planetary emergencies are happening right now.",
+        "They also say parents want to see the work.",
+    ]
+
+
+def test_bare_contrast_words_alone_do_not_count_as_another_side():
+    from coaching_engine.llm.prompts import find_other_side_references
+
+    assert find_other_side_references(speech(
+        "Free transport is cheap, but it also cuts pollution.",
+        "However, the main reason is fairness.",
+    )) == []
+
+
+def test_user_prompt_marks_rebuttal_applicable_only_when_the_other_side_is_named():
+    named = build_synthesis_prompt(speech("Critics say it costs too much.", "It pays for itself."))
+    assert "rebuttal is applicable" in named
+    assert '"Critics say it costs too much. It pays for itself."' in named
+
+    opening = build_synthesis_prompt(speech("We propose free transport.", "It cuts pollution."))
+    assert "rebuttal is applicable" not in opening
+
+
+def test_rebuttal_rubric_entry_requires_a_quote_before_the_level():
+    from coaching_engine.llm.prompts import SYNTHESIS_RESPONSE_SCHEMA
+
+    rubric = SYNTHESIS_RESPONSE_SCHEMA["properties"]["rubric"]["properties"]
+    assert list(rubric["rebuttal"]["properties"]) == ["opposing_view", "level", "reason"]
+    assert rubric["rebuttal"]["required"] == ["opposing_view", "level", "reason"]
+    assert "opposing_view" not in rubric["logic"]["properties"]
+
+
+def test_system_prompt_keeps_rebuttal_items_consistent_with_the_rubric():
+    system = build_synthesis_system_prompt()
+    for phrase in (
+        "decide from the transcript text itself, not only the\n  labels",
+        "Fill rubric.rebuttal.opposing_view first",
+        'if rebuttal is\n  "not_applicable", write no feedback item',
+    ):
+        assert phrase in system, phrase
+
+
+def test_the_opposing_view_quote_is_kept_with_the_rubric_reasons(sessions):
+    payload = {"feedback": [item("logic", "high", "x")], "rubric": rubric(rebuttal=2)}
+    payload["rubric"]["rebuttal"]["opposing_view"] = "They never answered it."
+    engine, _, _ = run(sessions, FakeLLM(payload))
+    assert engine.rubric_reasons["rebuttal_opposing_view"] == "They never answered it."
