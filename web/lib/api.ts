@@ -1,5 +1,8 @@
 import { tokenExpiresAt } from "./jwt";
 import type {
+  ProgressMetric,
+  ProgressPoint,
+  ProgressRange,
   SessionCreated,
   SessionReport,
   SessionSummary,
@@ -455,6 +458,14 @@ export function listSessions(): Promise<SessionSummary[]> {
 
 export function getSession(id: string): Promise<SessionSummary> {
   return request<SessionSummary>(`/v1/sessions/${id}`);
+}
+
+export function getProgress(
+  metric: ProgressMetric,
+  range: ProgressRange,
+): Promise<ProgressPoint[]> {
+  const query = new URLSearchParams({ metric, range });
+  return request<ProgressPoint[]>(`/v1/sessions/progress?${query}`);
 }
 
 export function getReport(id: string): Promise<SessionReport> {

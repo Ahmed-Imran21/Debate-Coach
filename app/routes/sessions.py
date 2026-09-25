@@ -1,8 +1,9 @@
 import uuid
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -13,6 +14,9 @@ from app.models.video_analysis import VideoAnalysis
 from app.routes.deps import get_current_user
 from app.schemas.session import (
     ALLOWED_CONTENT_TYPES,
+    ProgressMetric,
+    ProgressPoint,
+    ProgressRange,
     SessionCreateRequest,
     SessionCreateResponse,
     SessionOut,
@@ -20,6 +24,7 @@ from app.schemas.session import (
     SessionStartRequest,
 )
 from app.services import jobs, pipeline, storage, visual_signals
+from app.services.category_scores import CATEGORY_COLUMNS
 from visual_analysis import config as visual_config
 from visual_analysis.signals import SignalValidationError
 
@@ -417,6 +422,59 @@ def list_sessions(
     videos = _video_rows(db, [row.id for row in rows])
 
     return [_session_out(row, videos.get(row.id)) for row in rows]
+
+
+# ============================================================
+# PROGRESS
+#
+# Registered above GET /{session_id}: routes match in order, and
+# "progress" would otherwise be parsed as a session id (422).
+# ============================================================
+
+PROGRESS_COLUMNS = {"overall": "overall_score", **CATEGORY_COLUMNS}
+
+PROGRESS_WINDOWS = {
+    "1d": timedelta(days=1),
+    "1w": timedelta(days=7),
+    "1m": timedelta(days=30),
+}
+
+
+@router.get("/progress", response_model=list[ProgressPoint])
+def get_progress(
+    metric: ProgressMetric = Query(...),
+    range_: ProgressRange = Query(..., alias="range"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[ProgressPoint]:
+    """
+    The current user's score trend: one point per completed session,
+    oldest first. range is a rolling window back from now (1d, 1w,
+    1m = 24h, 7d, 30d, UTC) or the newest N sessions (5, 10, 15).
+    Reads session columns only, never object storage.
+    """
+
+    column = getattr(DebateSession, PROGRESS_COLUMNS[metric])
+
+    query = select(DebateSession.id, DebateSession.created_at, column).where(
+        DebateSession.user_id == current_user.id,
+        DebateSession.status == SessionStatus.completed,
+    )
+
+    if range_ in PROGRESS_WINDOWS:
+        since = datetime.now(timezone.utc) - PROGRESS_WINDOWS[range_]
+        rows = db.execute(
+            query.where(DebateSession.created_at >= since).order_by(
+                DebateSession.created_at.asc(), DebateSession.id.asc()
+            )
+        ).all()
+    else:
+        newest = db.execute(
+            query.order_by(DebateSession.created_at.desc(), DebateSession.id.desc()).limit(int(range_))
+        ).all()
+        rows = list(reversed(newest))
+
+    return [ProgressPoint(session_id=row[0], created_at=row[1], score=row[2]) for row in rows]
 
 
 @router.get("/{session_id}", response_model=SessionOut)

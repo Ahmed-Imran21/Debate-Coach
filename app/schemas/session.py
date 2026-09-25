@@ -163,3 +163,20 @@ class SessionReportOut(BaseModel):
     video_analysis: dict[str, Any] | None = None
     correlated_moments: list[dict[str, Any]] | None = None
     visual_feedback: dict[str, Any] | None = None
+
+
+# ------------------------------------------------------------
+# Progress graph (GET /v1/sessions/progress)
+# ------------------------------------------------------------
+
+# Anything outside these is a 422, before the route runs.
+ProgressMetric = Literal["overall", "argumentation", "rebuttal", "structure", "persuasion", "logic"]
+ProgressRange = Literal["1d", "1w", "1m", "5", "10", "15"]
+
+
+class ProgressPoint(BaseModel):
+    session_id: uuid.UUID
+    created_at: datetime
+    # None when the session has no score for this metric (rebuttal
+    # with nothing to rebut); the chart skips those points.
+    score: float | None

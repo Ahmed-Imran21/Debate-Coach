@@ -3,7 +3,7 @@ import uuid
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, String
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -46,6 +46,13 @@ PIPELINE_STAGES = [
 
 class DebateSession(Base):
     __tablename__ = "sessions"
+
+    # Serves GET /v1/sessions/progress: one user's completed sessions
+    # by created_at. Also created by migrations/0003 on existing
+    # databases (create_all() never alters an existing table).
+    __table_args__ = (
+        Index("ix_sessions_user_status_created", "user_id", "status", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -143,6 +150,18 @@ class DebateSession(Base):
         Integer,
         nullable=True,
     )
+
+    # Per-category coaching scores (0-100), copied from feedback.json
+    # when coaching completes so the progress graph never reads
+    # object storage. score_rebuttal is None when the speech had
+    # nothing to rebut ("not scored", not zero). Added by
+    # migrations/0003; older sessions filled by
+    # scripts/backfill_category_scores.py.
+    score_argumentation: Mapped[float | None] = mapped_column(Float, nullable=True)
+    score_rebuttal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    score_structure: Mapped[float | None] = mapped_column(Float, nullable=True)
+    score_persuasion: Mapped[float | None] = mapped_column(Float, nullable=True)
+    score_logic: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     error_message: Mapped[str | None] = mapped_column(
         String(1024),
