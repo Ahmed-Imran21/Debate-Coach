@@ -287,7 +287,8 @@ export interface SessionReport {
   title: string | null;
   status: SessionStatus;
   created_at: string;
-  scores: Partial<Record<Category | "overall", number>>;
+  /** A category is null when it wasn't scored — rebuttal, for a speech with nothing to rebut. */
+  scores: Partial<Record<Category | "overall", number | null>>;
   feedback: FeedbackItem[];
   raw_metrics: RawMetrics;
   speech_content: SpeechContent;

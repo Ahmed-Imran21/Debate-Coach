@@ -1,4 +1,6 @@
-from typing import Dict, List
+import re
+
+from typing import Dict, List, Optional, Union
 
 from ..models.feedback import FeedbackItem
 from ..models.scores import CategoryScores, CoachingScores
@@ -179,18 +181,24 @@ def calculate_overall_score(
     """
     Calculate the overall coaching score.
 
-    Equal weight across the six categories. Revisit the
-    weighting once there are enough real sessions to know which
-    categories actually predict a better speech.
+    Equal weight across the scored categories. A category that is
+    not scored (rebuttal when there was nothing to rebut) is left
+    out, not counted as zero. Revisit the weighting once there are
+    enough real sessions to know which categories actually predict
+    a better speech.
     """
 
     values = [
-        category_scores.quantitative,
-        category_scores.argumentation,
-        category_scores.rebuttal,
-        category_scores.structure,
-        category_scores.persuasion,
-        category_scores.logic,
+        value
+        for value in (
+            category_scores.quantitative,
+            category_scores.argumentation,
+            category_scores.rebuttal,
+            category_scores.structure,
+            category_scores.persuasion,
+            category_scores.logic,
+        )
+        if value is not None
     ]
 
     if not values:
@@ -217,3 +225,138 @@ def build_coaching_scores(
         categories=category_scores,
         overall=overall,
     )
+
+
+
+# The rule modules can spot a gap (no evidence, no conclusion) but
+# can't judge quality, so when they stand in for the LLM a content
+# category never scores above level 3, "a typical practice attempt".
+# Without the cap, a speech the rules found nothing wrong with would
+# get 85 everywhere, whatever it said.
+CONTENT_CATEGORIES = ("argumentation", "rebuttal", "structure", "persuasion", "logic")
+
+FALLBACK_CONTENT_CEILING = 60.0
+
+
+def build_fallback_scores(
+    feedback: List[FeedbackItem],
+) -> CoachingScores:
+
+    categories = calculate_category_scores(feedback)
+
+    for category in CONTENT_CATEGORIES:
+        value = getattr(categories, category)
+        setattr(categories, category, min(value, FALLBACK_CONTENT_CEILING))
+
+    return CoachingScores(
+        categories=categories,
+        overall=calculate_overall_score(categories),
+    )
+
+
+# ============================================================
+# RUBRIC SCORING (the LLM synthesis path)
+#
+# The model picks a level per content category against anchors
+# written for practice speeches (coaching_engine/llm/prompts.py);
+# the number comes from this table, in Python. Level 4 — a clear,
+# well-structured amateur attempt — is the 70-80 target.
+# ============================================================
+
+LEVEL_SCORES = {1: 20.0, 2: 40.0, 3: 60.0, 4: 75.0, 5: 90.0}
+
+NOT_APPLICABLE = "not_applicable"
+
+
+
+def build_rubric_scores(
+    quantitative_items: List[FeedbackItem],
+    levels: Dict[str, Union[int, str]],
+) -> CoachingScores:
+    """
+    Delivery stays deterministic: the existing formula over the
+    quantitative items. Each content category is its rubric level's
+    score; rebuttal marked not applicable is None and left out of
+    the overall.
+    """
+
+    quantitative = calculate_category_scores(quantitative_items).quantitative
+
+    def score(category: str) -> Optional[float]:
+        level = levels[category]
+        return None if level == NOT_APPLICABLE else LEVEL_SCORES[level]
+
+    categories = CategoryScores(
+        quantitative=quantitative,
+        argumentation=score("argumentation"),
+        rebuttal=score("rebuttal"),
+        structure=score("structure"),
+        persuasion=score("persuasion"),
+        logic=score("logic"),
+    )
+
+    return CoachingScores(categories=categories, overall=calculate_overall_score(categories))
+
+
+# ============================================================
+# VOLUME LIMITS
+# ============================================================
+
+MAX_CONTENT_ITEMS = 6
+MAX_DELIVERY_ITEMS = 2
+
+
+def _by_priority(items: List[FeedbackItem]) -> List[FeedbackItem]:
+    return sorted(items, key=lambda i: SEVERITY_PRIORITY.get(i.severity, 0), reverse=True)
+
+
+def cap_content(items: List[FeedbackItem], limit: int = MAX_CONTENT_ITEMS) -> List[FeedbackItem]:
+    """
+    At most `limit` items, the most severe issues first, but always
+    keeping one strength if there is one: an all-criticism list is
+    worse coaching than one that names what's working.
+    """
+
+    issues = _by_priority([i for i in items if i.severity != "positive"])
+    positives = [i for i in items if i.severity == "positive"]
+
+    if len(issues) + len(positives) <= limit:
+        return issues + positives
+
+    kept_positives = positives[:1] if positives else []
+    kept = issues[: limit - len(kept_positives)] + kept_positives
+    kept += positives[len(kept_positives) : len(kept_positives) + (limit - len(kept))]
+    return kept[:limit]
+
+
+def top_delivery(items: List[FeedbackItem], limit: int = MAX_DELIVERY_ITEMS) -> List[FeedbackItem]:
+    """The delivery items worth showing: issues before strengths."""
+    return _by_priority(items)[:limit]
+
+
+# The deterministic rule modules report the same gap once per
+# category ("No supporting evidence detected", "Limited evidential
+# support", "Arguments lack detected evidence", ...). On the fallback
+# path those are merged to one item per underlying theme, keeping the
+# most severe.
+_THEMES = (
+    ("evidence", re.compile(r"evidence|evidential|support", re.I)),
+    ("rebuttal", re.compile(r"rebuttal|counterargument|opposing", re.I)),
+    ("conclusion", re.compile(r"conclusion", re.I)),
+    ("fallacy", re.compile(r"fallac", re.I)),
+    ("reasoning", re.compile(r"reasoning", re.I)),
+)
+
+
+def _theme(item: FeedbackItem) -> str:
+    for name, pattern in _THEMES:
+        if pattern.search(item.title):
+            return f"{item.severity == 'positive'}:{name}"
+    return f"{item.category}:{item.title}"
+
+
+def dedupe_by_theme(items: List[FeedbackItem]) -> List[FeedbackItem]:
+    kept: Dict[str, FeedbackItem] = {}
+    for item in _by_priority(items):
+        kept.setdefault(_theme(item), item)
+    return list(kept.values())

@@ -27,7 +27,6 @@ class LLMClient:
         self,
         system_prompt: str,
         user_prompt: str,
-        response_schema: dict,
         temperature: float = 0.2,
         on_queued: Optional[Callable[[float], None]] = None,
     ) -> str:
@@ -59,11 +58,6 @@ class LLMClient:
                 "user_prompt cannot be empty."
             )
 
-        if not isinstance(response_schema, dict):
-            raise TypeError(
-                "response_schema must be a dictionary."
-            )
-
         estimated_input_tokens = max(
             1,
             len(system_prompt + user_prompt) // 4,
@@ -91,6 +85,9 @@ class LLMClient:
             ],
             max_tokens=self.ESTIMATED_OUTPUT_TOKENS,
             temperature=temperature,
+            # Provider-enforced JSON (Groq's json_object mode). The
+            # schema itself travels in the system prompt.
+            response_format="json",
             on_queued=on_queued,
         )
 

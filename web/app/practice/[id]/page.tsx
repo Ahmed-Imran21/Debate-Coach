@@ -372,20 +372,34 @@ function Report({ report }: { report: SessionReport }): ReactElement {
 
       <div className="bars" style={{ marginBottom: "2.5rem" }}>
         {SCORE_ORDER.map((category) => {
-          const value = report.scores[category] ?? 0;
+          const raw = report.scores[category];
+          // null: not scored (rebuttal for a speech with nothing to
+          // rebut), left out of the overall. Absent: an older report.
+          const notScored = raw === null;
+          const value = raw ?? 0;
 
           return (
             <div className="bar-row" key={category}>
               <span className="bar-label">
                 {CATEGORY_LABEL[category]}
               </span>
-              <div className="bar-track">
-                <div
-                  className="bar-fill"
-                  style={{ width: `${Math.min(100, value)}%` }}
-                />
-              </div>
-              <span className="bar-value">{Math.round(value)}</span>
+              {notScored ? (
+                // Spans the track and value columns: the value column
+                // is sized for a number, not a phrase.
+                <span className="note" style={{ gridColumn: "2 / 4", margin: 0 }}>
+                  Not scored: nothing to rebut
+                </span>
+              ) : (
+                <>
+                  <div className="bar-track">
+                    <div
+                      className="bar-fill"
+                      style={{ width: `${Math.min(100, value)}%` }}
+                    />
+                  </div>
+                  <span className="bar-value">{Math.round(value)}</span>
+                </>
+              )}
             </div>
           );
         })}
@@ -394,7 +408,8 @@ function Report({ report }: { report: SessionReport }): ReactElement {
       <p className="note" style={{ maxWidth: "58ch" }}>
         Delivery is arithmetic over the audio. The other five come from a
         language model reading your transcript, so treat them as a second
-        opinion rather than a mark.
+        opinion rather than a mark. Rebuttal isn&apos;t scored when there was
+        nothing to rebut, and doesn&apos;t count toward the overall.
       </p>
 
       <h2 style={{ fontSize: "var(--step-2)", margin: "2.5rem 0 1rem" }}>
