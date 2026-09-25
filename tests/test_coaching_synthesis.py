@@ -315,3 +315,48 @@ def test_the_opposing_view_quote_is_kept_with_the_rubric_reasons(sessions):
     payload["rubric"]["rebuttal"]["opposing_view"] = "They never answered it."
     engine, _, _ = run(sessions, FakeLLM(payload))
     assert engine.rubric_reasons["rebuttal_opposing_view"] == "They never answered it."
+
+
+# ---------------------------------------------------------------
+# Level-4 calibration: quality-gated, not presence-gated
+#
+# A level-4 element counts only if it does its job. A presence-gated
+# wording ("one example is enough"; every element present = level 4)
+# lifted a rambling speech from 46 to 58 on the strength of an
+# anecdote and a "so yeah" ending. These pin the wording; the
+# behaviour itself was verified on real model output.
+# ---------------------------------------------------------------
+
+def flat(text):
+    return " ".join(text.split())
+
+
+def test_level_4_elements_count_only_when_doing_their_job():
+    system = flat(build_synthesis_system_prompt())
+    for phrase in (
+        "each of these elements is present AND doing its job",
+        "Restating the position (\"it's bad because it's bad\", \"for many reasons\") is not a reason",
+        "A personal anecdote alone (\"my cousin is always on her phone\") is not support",
+        "A filler closing line (\"so yeah\", \"or something\", \"yeah\") is not a conclusion",
+        "Circling back to the same point, or a string of loosely related sentences, is not structure",
+        "An element that is only vaguely or nominally present counts as missing",
+    ):
+        assert phrase in system, phrase
+
+
+def test_level_3_is_defined_by_a_missing_or_failing_level_4_element():
+    system = flat(build_synthesis_system_prompt())
+    assert "at least one level-4 element is missing or not doing its job" in system
+
+
+def test_leniency_rules_apply_only_once_every_element_works():
+    system = flat(build_synthesis_system_prompt())
+    assert "Lower only the category the gap most affects" in system
+    assert "level-5 improvements, not level-3 gaps" in system
+    assert "This applies only when every level-4 element is genuinely doing its job" in system
+
+
+def test_presence_alone_no_longer_earns_level_4():
+    system = flat(build_synthesis_system_prompt())
+    # The rejected wording, which let an anecdote count as support.
+    assert "one is enough. A speech with every one of these elements is level 4" not in system
