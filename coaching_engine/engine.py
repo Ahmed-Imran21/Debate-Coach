@@ -1,4 +1,3 @@
-import json
 import re
 
 from typing import Any, Callable, Dict, List, Optional
@@ -6,11 +5,10 @@ from typing import Any, Callable, Dict, List, Optional
 from api.client import APIClient
 
 from .llm.client import LLMClient
-from .llm.parser import parse_feedback_response
+from .llm.parser import parse_synthesis_response
 from .llm.prompts import (
-    FEEDBACK_RESPONSE_SCHEMA,
-    SYSTEM_PROMPT,
-    build_qualitative_prompt,
+    build_synthesis_prompt,
+    build_synthesis_system_prompt,
 )
 
 from .qualitative_feedback.argumentation import analyze_argumentation
@@ -21,7 +19,11 @@ from .qualitative_feedback.structure import analyze_structure
 
 from .qualitative_feedback.feedback_aggregator import (
     aggregate_feedback,
-    build_coaching_scores,
+    build_fallback_scores,
+    build_rubric_scores,
+    cap_content,
+    dedupe_by_theme,
+    top_delivery,
 )
 
 from .quantitative_feedback import analyze_quantitative_feedback
@@ -34,20 +36,25 @@ from .utils.validators import validate_session
 
 
 # ============================================================
-# QUALITATIVE CATEGORIES
+# QUALITATIVE FEEDBACK
 #
-# Each category has two independent producers:
+# One LLM call reads the whole speech and returns a few
+# synthesized feedback items plus a rubric level per content
+# category (coaching_engine/llm/prompts.py). Five separate
+# per-category calls, alongside five rule modules flagging the
+# same gaps, used to produce 35-45 items for a sub-minute speech
+# — "no evidence" alone nine times — and the repetition dragged
+# every score down.
 #
-#   1. A deterministic rule module that reads the semantic
-#      labels in speech_content.json. It never calls an LLM
-#      and always runs.
-#
-#   2. An optional LLM pass that produces richer, evidence-
-#      backed feedback for the same category.
-#
-# The deterministic pass is the floor. If the LLM pass fails
-# for a category, that category still produces feedback.
+# The call is tried twice. The deterministic rule modules are
+# the fallback if both attempts fail or return something
+# unusable: their items are merged per underlying issue and
+# capped, and scored by the formula with content categories
+# held to level 3 (build_fallback_scores). Every session still
+# gets feedback.
 # ============================================================
+
+SYNTHESIS_ATTEMPTS = 2
 
 DETERMINISTIC_ANALYZERS = {
     "argumentation": analyze_argumentation,
@@ -55,29 +62,6 @@ DETERMINISTIC_ANALYZERS = {
     "structure": analyze_structure,
     "persuasion": analyze_persuasion,
     "logic": analyze_logic,
-}
-
-CATEGORY_SYSTEM_PROMPTS = {
-    "argumentation": (
-        "You are an expert debate coach specializing "
-        "in argumentation analysis."
-    ),
-    "rebuttal": (
-        "You are an expert debate coach specializing "
-        "in rebuttal and counterargument analysis."
-    ),
-    "structure": (
-        "You are an expert debate coach specializing "
-        "in speech structure and organization."
-    ),
-    "persuasion": (
-        "You are an expert debate coach specializing "
-        "in persuasion and rhetorical effectiveness."
-    ),
-    "logic": (
-        "You are an expert debate coach specializing "
-        "in logical reasoning and fallacy detection."
-    ),
 }
 
 
@@ -122,8 +106,9 @@ class CoachingEngine:
 
         (feedback, scores)
 
-    where feedback is a deduplicated, severity-ordered list of
-    FeedbackItem and scores is a CoachingScores instance.
+    where feedback is at most 8 severity-ordered FeedbackItems (up
+    to 6 on content, up to 2 on delivery) and scores is a
+    CoachingScores instance.
     """
 
     def __init__(
@@ -140,6 +125,9 @@ class CoachingEngine:
         self.use_llm = use_llm
 
         self.llm_errors: Dict[str, str] = {}
+        # The model's one-line reason per rubric level, from the last
+        # analyze_session() that used the LLM path.
+        self.rubric_reasons: Dict[str, str] = {}
 
         if llm_client is not None:
             self.llm_client = llm_client
@@ -164,107 +152,50 @@ class CoachingEngine:
 
         validate_session(session)
 
-        feedback: List[FeedbackItem] = []
+        # Delivery: deterministic, from raw_metrics.json. Every item
+        # feeds the delivery score; only the top two are shown.
+        delivery = analyze_quantitative_feedback(session)
 
-        # ----------------------------------------------------
-        # 1. Quantitative (deterministic, raw_metrics.json)
-        # ----------------------------------------------------
-
-        feedback.extend(
-            analyze_quantitative_feedback(session)
-        )
-
-        # ----------------------------------------------------
-        # 2. Qualitative rules (deterministic, labels only)
-        # ----------------------------------------------------
-
-        for category, analyzer in DETERMINISTIC_ANALYZERS.items():
-            feedback.extend(
-                analyzer(session)
-            )
-
-        # ----------------------------------------------------
-        # 3. Qualitative LLM pass (optional, per category)
-        # ----------------------------------------------------
+        synthesis = None
 
         if self.use_llm and self.llm_client is not None:
-            feedback.extend(
-                self._run_llm_analysis(
-                    session.speech_content
-                )
-            )
-
-        # ----------------------------------------------------
-        # 4. Aggregate and score
-        # ----------------------------------------------------
-
-        aggregated = aggregate_feedback(feedback)
-
-        scores = build_coaching_scores(aggregated)
-
-        return aggregated, scores
-
-    # --------------------------------------------------------
-    # LLM analysis
-    # --------------------------------------------------------
-
-    def _run_llm_analysis(
-        self,
-        speech_content: Dict[str, Any],
-    ) -> List[FeedbackItem]:
-
-        results: List[FeedbackItem] = []
-
-        for category in DETERMINISTIC_ANALYZERS:
-
             try:
-                results.extend(
-                    self._analyze_category(
-                        category=category,
-                        speech_content=speech_content,
-                    )
-                )
-
+                synthesis = self._synthesize(session.speech_content)
             except Exception as error:
+                self.llm_errors["synthesis"] = f"{type(error).__name__}: {error}"
 
-                # One failed category must not discard the
-                # feedback already produced for the others.
-                # The deterministic pass has already covered
-                # this category, so the run stays useful.
+        if synthesis is not None:
+            content, levels, self.rubric_reasons = synthesis
+            scores = build_rubric_scores(delivery, levels)
+            content = cap_content(content)
+        else:
+            rules = [item for analyze in DETERMINISTIC_ANALYZERS.values() for item in analyze(session)]
+            merged = dedupe_by_theme(rules)
+            scores = build_fallback_scores(delivery + merged)
+            content = cap_content(merged)
 
-                self.llm_errors[category] = (
-                    f"{type(error).__name__}: {error}"
+        feedback = aggregate_feedback(top_delivery(delivery) + content)
+
+        return feedback, scores
+
+    # --------------------------------------------------------
+    # LLM synthesis
+    # --------------------------------------------------------
+
+    def _synthesize(self, speech_content: Dict[str, Any]):
+        # One retry: in testing ~5% of calls hit a transient connection
+        # error (no tokens spent) and ~5% of responses left out part of
+        # the rubric. Either way a second attempt almost always
+        # succeeds, and it beats falling back to the rules.
+        for attempt in range(SYNTHESIS_ATTEMPTS):
+            try:
+                response = self.llm_client.generate(
+                    system_prompt=build_synthesis_system_prompt(),
+                    user_prompt=build_synthesis_prompt(speech_content),
+                    temperature=0.2,
+                    on_queued=self.on_queued,
                 )
-
-        return results
-
-    def _analyze_category(
-        self,
-        category: str,
-        speech_content: Dict[str, Any],
-    ) -> List[FeedbackItem]:
-
-        user_prompt = build_qualitative_prompt(
-            category=category,
-            speech_content=speech_content,
-        )
-
-        system_prompt = (
-            f"{CATEGORY_SYSTEM_PROMPTS[category]}\n\n"
-            f"{SYSTEM_PROMPT.strip()}\n\n"
-            "Return a single JSON object matching this schema "
-            "exactly, with no prose and no markdown fences:\n"
-            f"{json.dumps(FEEDBACK_RESPONSE_SCHEMA)}"
-        )
-
-        response = self.llm_client.generate(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_schema=FEEDBACK_RESPONSE_SCHEMA,
-            temperature=0.2,
-            on_queued=self.on_queued,
-        )
-
-        return parse_feedback_response(
-            _strip_code_fences(response)
-        )
+                return parse_synthesis_response(_strip_code_fences(response))
+            except Exception:
+                if attempt == SYNTHESIS_ATTEMPTS - 1:
+                    raise
