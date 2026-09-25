@@ -505,3 +505,26 @@ export interface AdminUserPage {
   /** Pass back as `cursor` for the next page; null on the last page. */
   next_cursor: string | null;
 }
+
+/* ---------------------------------------------------------- */
+/* Progress graph (GET /v1/sessions/progress)                  */
+/* ---------------------------------------------------------- */
+
+/** "overall" is the chart's "All". */
+export type ProgressMetric =
+  | "overall"
+  | "argumentation"
+  | "rebuttal"
+  | "structure"
+  | "persuasion"
+  | "logic";
+
+/** Rolling 24h / 7d / 30d windows, or the newest 5 / 10 / 15 sessions. */
+export type ProgressRange = "1d" | "1w" | "1m" | "5" | "10" | "15";
+
+export interface ProgressPoint {
+  session_id: string;
+  created_at: string;
+  /** null when the session has no score for this metric (rebuttal with nothing to rebut). */
+  score: number | null;
+}
