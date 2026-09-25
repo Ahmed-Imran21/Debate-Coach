@@ -63,10 +63,27 @@ professional or championship debater:
   2 = A position is present, but it is mostly bare assertion with
       little or no reasoning.
   3 = A typical practice attempt: a clear position and some reasoning,
-      with real gaps (for example no evidence, loose structure, no
-      conclusion).
-  4 = A clear, well-structured amateur attempt: a stated position,
-      reasons that follow from it, some support, and a conclusion.
+      but at least one level-4 element is missing or not doing its
+      job.
+  4 = A clear, well-structured amateur attempt, in which each of these
+      elements is present AND doing its job:
+      - a stated position;
+      - reasons that explain WHY the position holds. Restating the
+        position ("it's bad because it's bad", "for many reasons") is
+        not a reason;
+      - support a listener could check or would find credible: at
+        least one concrete example, statistic, study or source (one is
+        enough). A personal anecdote alone ("my cousin is always on her
+        phone") is not support;
+      - a conclusion that ties the reasons back to the position. A
+        filler closing line ("so yeah", "or something", "yeah") is not
+        a conclusion;
+      - for structure: distinct points in a clear order. Circling back
+        to the same point, or a string of loosely related sentences,
+        is not structure, even if it has a first and a last line.
+      An element that is only vaguely or nominally present counts as
+      missing. When every element does its job, the speech is level 4
+      even though it could be stronger.
   5 = Competition-ready: strong evidence, anticipates and answers
       objections, polished structure. Rare in a practice speech.
 
@@ -74,7 +91,15 @@ Calibration:
 - Level 1 is only for speech that is not a coherent argument at all.
   A coherent but weak argument is at least level 2.
 - A single gap (such as no evidence, or no conclusion) lowers a
-  category by one level, not to the bottom.
+  category by one level, not to the bottom. Lower only the category
+  the gap most affects, the one you file its feedback item under;
+  do not lower argumentation, persuasion and logic all for the same
+  gap.
+- Do not hold a category below level 4 for what separates 4 from 5:
+  "could use more evidence", "responses could be deeper" or "could be
+  more polished" are level-5 improvements, not level-3 gaps. Put them
+  in the feedback, not in the level. This applies only when every
+  level-4 element is genuinely doing its job.
 - Brevity alone is not a flaw: a short speech that makes a clear,
   reasoned point can reach level 3 or 4.
 - Rebuttal: decide from the transcript text itself, not only the
