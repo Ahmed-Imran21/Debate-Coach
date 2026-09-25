@@ -138,7 +138,9 @@ class SessionReportOut(BaseModel):
     status: SessionStatus
     created_at: datetime
 
-    scores: dict[str, float]
+    # rebuttal is null when the speech had nothing to rebut: "not
+    # scored", not zero (coaching_engine/models/scores.py).
+    scores: dict[str, float | None]
     feedback: list[FeedbackItemOut]
 
     raw_metrics: dict[str, Any]

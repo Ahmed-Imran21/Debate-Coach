@@ -1,17 +1,20 @@
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Optional
 
 
 @dataclass
 class CategoryScores:
     """
-    Scores for the individual coaching categories.
-    Values should normally be between 0 and 100.
+    Scores for the individual coaching categories, 0 to 100.
+
+    rebuttal is None when the speech had nothing to rebut (e.g. an
+    opening speech): "not scored", which is different from scoring 0,
+    and it's left out of the overall score.
     """
 
     quantitative: float = 0.0
     argumentation: float = 0.0
-    rebuttal: float = 0.0
+    rebuttal: Optional[float] = 0.0
     structure: float = 0.0
     persuasion: float = 0.0
     logic: float = 0.0
@@ -26,7 +29,7 @@ class CoachingScores:
     categories: CategoryScores = field(default_factory=CategoryScores)
     overall: float = 0.0
 
-    def as_dict(self) -> Dict[str, float]:
+    def as_dict(self) -> Dict[str, Optional[float]]:
         """
         Return scores in a JSON-friendly format.
         """
