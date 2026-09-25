@@ -10,6 +10,7 @@ import Recorder from "@/components/Recorder";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import { formatClock } from "@/components/SpeechTrack";
+import ProgressChart from "./ProgressChart";
 import {
   ApiError,
   clearTokens,
@@ -92,6 +93,10 @@ export default function PracticePage(): ReactElement {
     );
   }, []);
 
+  // Changes when a session finishes, so the chart refetches.
+  const completedCount =
+    sessions?.filter((row) => row.status === "completed").length ?? 0;
+
   function signOut(): void {
     clearTokens();
     router.replace("/");
@@ -138,6 +143,15 @@ export default function PracticePage(): ReactElement {
             <div style={{ maxWidth: "34rem" }}>
               <Recorder />
             </div>
+          </div>
+        </section>
+
+        <section className="block-tight">
+          <div className="wrap">
+            <h2 style={{ fontSize: "var(--step-2)", marginBottom: "1rem" }}>
+              Your progress
+            </h2>
+            <ProgressChart refreshKey={completedCount} />
           </div>
         </section>
 

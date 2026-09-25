@@ -62,6 +62,7 @@ from app.core.config import settings
 from app.db.database import SessionLocal
 from app.models.session import DebateSession, SessionStatus
 from app.models.video_analysis import SessionMetric, VideoAnalysis
+from app.services.category_scores import CATEGORY_COLUMNS
 from app.services import engine, storage, visual_signals
 from app.services.audio_convert import (
     AudioConversionError,
@@ -648,6 +649,12 @@ def _record_summary(
 
     debate_session.overall_score = scores.overall
     debate_session.feedback_count = feedback_count
+
+    # Per-category scores for the progress graph. rebuttal is None
+    # when there was nothing to rebut, and stays NULL.
+    category_scores = scores.as_dict()
+    for category, column in CATEGORY_COLUMNS.items():
+        setattr(debate_session, column, category_scores[category])
 
 
 # ============================================================
