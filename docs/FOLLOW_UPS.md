@@ -71,3 +71,47 @@ its `exp` (`tokenExpiresAt` in `web/lib/jwt.ts` already decodes it).
 Keep `retryOnAuthFailure: false`: the heartbeat must not refresh.
 Whether to also redirect to login, or leave that to the next real
 action, is a UX call.
+
+## Coaching score noise can look like a trend in a progress report
+
+**Seen:** on the Feature 2 canary (2026-09-26), the same recording
+was run through the pipeline twice. Rebuttal and logic came back a
+level apart, 60 then 40, with nothing different in the speech. The
+progress report then described both as having "slipped", which is
+faithful to the scores but reports noise as a trend. The same
+one-level wobble showed up in earlier calibration runs (the space
+speech's rebuttal scored 40/60/40 across three runs).
+
+**Why it matters:** a report over only 2 sessions compares two
+single samples, so a one-level move can easily be scoring variance
+rather than a real change.
+
+**Options (not done):**
+1. In `progress_report/prompt.py` (`_level_trends`), only call a
+   level trend when it moves two or more levels, or moves in a
+   consistent direction across three or more sessions. Otherwise
+   report it as "about the same".
+2. Reduce the variance at the source: in the coaching engine
+   (`coaching_engine/llm/prompts.py`), for example with a lower
+   temperature or more tightly anchored rubric levels. Re-verify
+   calibration afterwards.
+
+Either change needs real test runs, like the earlier calibration work.
+
+## The first request after idle can take about 27 seconds
+
+**Seen:** 2026-09-26 07:40 UTC. The backend had scaled to zero; a
+`/health` request took 27.0s while a new instance started (startup
+completed 07:40:57), and every request after answered in about 4ms.
+
+**Why it matters:** the frontend's default request timeout is 30s
+(`DEFAULT_TIMEOUT_MS` in `web/lib/api.ts`). A slightly slower cold
+start, or a heavier first request, would fail with a timeout for the
+first visitor after an idle period. The progress-report call has its
+own 120s timeout, so it isn't affected.
+
+**Options (not done):**
+1. `--min-instances=1` on the Cloud Run service. This removes cold
+   starts at the cost of one always-on instance.
+2. A longer timeout, or one automatic retry, for the first request a
+   page makes, so a cold start costs a delay instead of an error.
