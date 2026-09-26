@@ -31,6 +31,27 @@ def test_drops_bullets_with_digits_since_the_model_is_never_sent_numbers():
     assert outcome.dropped == 2
 
 
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Argumentation was a weak spot in both sessions, though the specific issue varied.",
+        "Structure was weak each time, but for different reasons.",
+        "The problem differed between sessions.",
+        "Your structural issues vary from speech to speech.",
+        "There was variation in your rebuttal problems.",
+    ],
+)
+def test_drops_bullets_claiming_sessions_differed_since_the_model_is_never_told_that(claim):
+    outcome = validator.validate(reply([claim, "Your pace is now comfortable."]))
+    assert outcome.bullets == ["Your pace is now comfortable."]
+    assert outcome.dropped == 1
+
+
+def test_keeps_bullets_that_merely_mention_various_things():
+    outcome = validator.validate(reply(["You now cover various points in your opening."]))
+    assert outcome.bullets == ["You now cover various points in your opening."]
+
+
 def test_cleans_markers_whitespace_and_dashes_and_drops_duplicates():
     outcome = validator.validate(reply(["- You  improved\n here.", "• you improved here.", "* Structure — better.", "a. Clearer claims."]))
     assert outcome.bullets == ["You improved here.", "Structure, better.", "Clearer claims."]
@@ -118,7 +139,7 @@ def test_system_prompt_states_the_rules():
         "Use the trends block as the facts",
         "If trends.clearest_improvement is set, your first bullet is about it",
         "ONLY if it is in trends.recurring_points",
-        "Never suggest one issue carried over",
+        "Do not say it was the same issue, and do not say it was a different one",
         "Mention every item in trends.got_worse",
         "Never describe something as solid, good, strong or steady if it is in trends.got_worse",
         "Never give a reason or cause for a change",
@@ -183,15 +204,36 @@ def test_delivery_trends_know_which_way_is_better():
     assert trends["stutters"] == "unchanged: none"
 
 
-def test_different_weaknesses_in_one_area_are_not_reported_as_one_continuing_issue():
+@pytest.mark.parametrize(
+    "first, second",
+    [
+        ("Unclear central position", "Insufficient supporting evidence"),  # really different
+        ("Insufficient evidence for claims", "Insufficient concrete evidence"),  # really the same
+    ],
+    ids=["actually-different", "actually-the-same"],
+)
+def test_an_unconfirmed_repeat_is_reported_neutrally_never_as_same_or_different(first, second):
+    """Word matching can't tell these two cases apart, so neither may claim anything."""
     trends = prompt.build_trends([
-        session(0, 2, points=[("argumentation", "main weakness", "Unclear central position")]),
-        session(1, 2, points=[("argumentation", "main weakness", "Insufficient supporting evidence")]),
+        session(0, 2, points=[("argumentation", "main weakness", first)]),
+        session(1, 2, points=[("argumentation", "main weakness", second)]),
     ])
     assert trends["recurring_points"] == []
-    assert trends["areas_with_different_weaknesses"] == [
-        {"area": "argumentation", "sessions": "both sessions", "note": "a weakness in each of these sessions, but a different one each time"}
+    assert trends["areas_weak_in_several_sessions"] == [
+        {"area": "argumentation", "sessions": "both sessions", "note": "a weak spot in each of these sessions; whether it was the same issue is not known"}
     ]
+    assert "different" not in json.dumps(trends)
+
+
+def test_a_title_wholly_inside_a_longer_one_is_the_same_point():
+    trends = prompt.build_trends([
+        session(0, 2, points=[("logic", "main weakness", "Red herring fallacy undermines logical credibility")]),
+        session(1, 2, points=[("logic", "main weakness", "Red herring fallacy")]),
+    ])
+    assert trends["recurring_points"] == [
+        {"area": "logic", "kind": "weakness", "point": "Red herring fallacy", "sessions": "both sessions"}
+    ]
+    assert trends["areas_weak_in_several_sessions"] == []
 
 
 def test_the_same_point_reworded_slightly_is_recurring():
@@ -203,7 +245,7 @@ def test_the_same_point_reworded_slightly_is_recurring():
     assert trends["recurring_points"] == [
         {"area": "rebuttal", "kind": "weakness", "point": "Rebuttal is limited", "sessions": "the first and third sessions"}
     ]
-    assert trends["areas_with_different_weaknesses"] == []
+    assert trends["areas_weak_in_several_sessions"] == []
 
 
 @pytest.mark.parametrize(
@@ -213,8 +255,11 @@ def test_the_same_point_reworded_slightly_is_recurring():
         (("logic", "weakness", "Unsupported leap"), ("argumentation", "weakness", "Unsupported leap")),
         (("structure", "weakness", "Missing conclusion"), ("structure", "strength", "Clear conclusion")),
         (("logic", "weakness", "Lack of clear"), ("logic", "weakness", "Missing clear")),
+        (("rebuttal", "weakness", "Limited rebuttal"), ("rebuttal", "weakness", "Weak rebuttal to proponents")),
+        (("argumentation", "weakness", "Insufficient evidence for claims"), ("argumentation", "weakness", "Insufficient concrete evidence")),
+        (("rebuttal", "weakness", "Evidence rarely cited in rebuttal"), ("rebuttal", "weakness", "Rebuttal evidence was vague and unsourced")),
     ],
-    ids=["partial-overlap", "different-area", "weakness-vs-strength", "only-noise-words"],
+    ids=["partial-overlap", "different-area", "weakness-vs-strength", "only-noise-words", "one-word-subset", "one-shared-word", "two-shared-not-subset"],
 )
 def test_recurrence_is_strict_when_unsure(a, b):
     trends = prompt.build_trends([session(0, 2, points=[a]), session(1, 2, points=[b])])
