@@ -45,3 +45,29 @@ alert on ERROR severity.
 
 Option 1 is the recommended fix, with a test for a >72-byte password
 hashed by the current code still verifying afterwards.
+
+## An expired tab keeps sending heartbeats that get 401 every minute
+
+**Seen:** one browser tab (Firefox on Ubuntu) has sent
+`POST /v1/users/heartbeat` every minute since 2026-09-24 18:07 UTC,
+and every one gets a 401. It never redirects to login and never
+stops.
+
+**Likely cause (frontend):** `web/components/Heartbeat.tsx` runs a
+60-second interval that fires whenever *any* access token is in
+localStorage, expired or not. `heartbeat()` in `web/lib/api.ts` uses
+`retryOnAuthFailure: false` on purpose, so a forgotten tab can't
+keep a session alive forever by refreshing. The interval then
+swallows the 401 (`.catch(() => {})`), so nothing ever stops it.
+
+**Why it's harmless:** the design goal holds: the session does
+expire, and the requests are rejected. The cost is one wasted
+request per minute per forgotten tab, log noise, and a tab that
+still looks signed in until the next real action.
+
+**Fix direction (not done):** on a 401 from heartbeat, clear the
+interval, or stop pinging while the stored access token is past
+its `exp` (`tokenExpiresAt` in `web/lib/jwt.ts` already decodes it).
+Keep `retryOnAuthFailure: false`: the heartbeat must not refresh.
+Whether to also redirect to login, or leave that to the next real
+action, is a UX call.
