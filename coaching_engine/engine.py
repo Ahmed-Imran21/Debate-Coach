@@ -7,6 +7,7 @@ from api.client import APIClient
 from .llm.client import LLMClient
 from .llm.parser import parse_synthesis_response
 from .llm.prompts import (
+    PracticeMotion,
     build_synthesis_prompt,
     build_synthesis_system_prompt,
 )
@@ -118,8 +119,14 @@ class CoachingEngine:
         api_client: Optional[APIClient] = None,
         on_queued: Optional[Callable[[float], None]] = None,
         use_llm: bool = True,
+        motion: Optional[PracticeMotion] = None,
     ):
         self.sessions_dir = sessions_dir
+
+        # The practice motion the speaker chose, if any. None ("No
+        # prompt") coaches exactly as before motions existed. Only the
+        # LLM synthesis uses it; the rule-based fallback can't.
+        self.motion = motion
 
         self.on_queued = on_queued
         self.use_llm = use_llm
@@ -190,8 +197,8 @@ class CoachingEngine:
         for attempt in range(SYNTHESIS_ATTEMPTS):
             try:
                 response = self.llm_client.generate(
-                    system_prompt=build_synthesis_system_prompt(),
-                    user_prompt=build_synthesis_prompt(speech_content),
+                    system_prompt=build_synthesis_system_prompt(self.motion),
+                    user_prompt=build_synthesis_prompt(speech_content, self.motion),
                     temperature=0.2,
                     on_queued=self.on_queued,
                 )

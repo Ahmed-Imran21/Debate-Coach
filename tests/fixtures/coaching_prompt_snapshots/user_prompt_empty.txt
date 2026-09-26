@@ -1,0 +1,8 @@
+
+Review this practice speech. Give 3-6 synthesized feedback items and a rubric level for each of: argumentation, rebuttal, structure, persuasion, logic.
+
+SPEECH (labelled segments):
+{
+  "session_id": "snap-empty",
+  "segments": []
+}

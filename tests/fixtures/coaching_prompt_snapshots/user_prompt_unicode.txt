@@ -1,0 +1,20 @@
+
+Review this practice speech. Give 3-6 synthesized feedback items and a rubric level for each of: argumentation, rebuttal, structure, persuasion, logic.
+
+These passages name an opposing side, so rebuttal is applicable and must be scored 1-5 on how well the speaker answers them:
+- "Naïve policies — like this one — cost ₹ crores; critics say otherwise."
+
+SPEECH (labelled segments):
+{
+  "session_id": "snap-unicode",
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 3.0,
+      "text": "Naïve policies — like this one — cost ₹ crores; critics say otherwise.",
+      "labels": [
+        "claim"
+      ]
+    }
+  ]
+}

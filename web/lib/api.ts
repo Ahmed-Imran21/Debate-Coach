@@ -1,6 +1,7 @@
 import { tokenExpiresAt } from "./jwt";
 import type {
   LatestProgressReport,
+  Motion,
   ProgressMetric,
   ProgressPoint,
   ProgressRange,
@@ -491,6 +492,10 @@ export function getLatestProgressReport(): Promise<LatestProgressReport> {
   return request<LatestProgressReport>("/v1/progress-reports/latest");
 }
 
+export function getMotions(): Promise<Motion[]> {
+  return request<Motion[]>("/v1/motions");
+}
+
 export function getReport(id: string): Promise<SessionReport> {
   return request<SessionReport>(`/v1/sessions/${id}/report`);
 }
@@ -504,6 +509,8 @@ export function createSession(input: {
   title: string | null;
   /** Defaults to "not_requested" server-side when omitted. */
   video_analysis?: "requested" | "not_requested";
+  /** A practice motion id from getMotions(); omit for "No prompt". */
+  motion_id?: string;
 }): Promise<SessionCreated> {
   return request<SessionCreated>("/v1/sessions", {
     method: "POST",
@@ -600,12 +607,15 @@ export async function putToSignedUrl(
 export async function uploadAndStart(
   blob: Blob,
   title: string | null,
+  motionId: string | null = null,
 ): Promise<string> {
   const contentType = blob.type.split(";")[0] || "audio/webm";
 
+  // "No prompt" sends exactly the request this always sent.
   const created = await createSession({
     content_type: contentType,
     title,
+    ...(motionId ? { motion_id: motionId } : {}),
   });
 
   await putToSignedUrl(created.upload_url, created.upload_headers, blob);

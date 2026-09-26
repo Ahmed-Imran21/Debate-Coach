@@ -1,0 +1,33 @@
+
+Review this practice speech. Give 3-6 synthesized feedback items and a rubric level for each of: argumentation, rebuttal, structure, persuasion, logic.
+
+SPEECH (labelled segments):
+{
+  "session_id": "snap-plain",
+  "segments": [
+    {
+      "start": 0.5,
+      "end": 2.6,
+      "text": "The motion is clearly justified.",
+      "labels": [
+        "claim"
+      ]
+    },
+    {
+      "start": 3.1,
+      "end": 5.2,
+      "text": "This evidence is overwhelming.",
+      "labels": [
+        "reasoning"
+      ]
+    },
+    {
+      "start": 6.0,
+      "end": 7.7,
+      "text": "They never answered it.",
+      "labels": [
+        "conclusion"
+      ]
+    }
+  ]
+}

@@ -198,6 +198,8 @@ export interface SessionSummary {
   id: string;
   title: string | null;
   status: SessionStatus;
+  /** The practice motion, or null for "No prompt". Optional: older backends omit it. */
+  motion?: Motion | null;
   progress: number;
   queue_wait_seconds: number | null;
   overall_score: number | null;
@@ -286,6 +288,8 @@ export interface SessionReport {
   id: string;
   title: string | null;
   status: SessionStatus;
+  /** The practice motion, or null for "No prompt". */
+  motion?: Motion | null;
   created_at: string;
   /** A category is null when it wasn't scored — rebuttal, for a speech with nothing to rebut. */
   scores: Partial<Record<Category | "overall", number | null>>;
@@ -551,4 +555,17 @@ export interface LatestProgressReport {
   can_generate: boolean;
   /** Set when today's (UTC) report exists: the next UTC midnight. */
   next_available_at: string | null;
+}
+
+/* ---------------------------------------------------------- */
+/* Practice motions (GET /v1/motions)                          */
+/* ---------------------------------------------------------- */
+
+export interface Motion {
+  /** Stable id from app/motions.py; sent as motion_id. */
+  id: string;
+  /** Short topic, shown in the dropdown. */
+  title: string;
+  /** The motion itself: "This house would ...". */
+  description: string;
 }

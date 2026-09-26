@@ -163,6 +163,11 @@ class DebateSession(Base):
     score_persuasion: Mapped[float | None] = mapped_column(Float, nullable=True)
     score_logic: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # The practice motion chosen before recording: an id from
+    # app/motions.py, or None for "No prompt". Added by
+    # migrations/0005.
+    motion_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     error_message: Mapped[str | None] = mapped_column(
         String(1024),
         nullable=True,
