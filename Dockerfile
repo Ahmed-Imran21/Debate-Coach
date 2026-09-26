@@ -42,6 +42,7 @@ COPY coaching_engine/ ./coaching_engine/
 COPY session_timeline/ ./session_timeline/
 COPY visual_analysis/ ./visual_analysis/
 COPY visual_coaching/ ./visual_coaching/
+COPY progress_report/ ./progress_report/
 COPY app/ ./app/
 
 RUN useradd --create-home --uid 10001 appuser \

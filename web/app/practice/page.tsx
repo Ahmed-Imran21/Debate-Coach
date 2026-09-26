@@ -11,6 +11,7 @@ import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import { formatClock } from "@/components/SpeechTrack";
 import ProgressChart from "./ProgressChart";
+import ProgressReportPanel from "./ProgressReportPanel";
 import {
   ApiError,
   clearTokens,
@@ -152,6 +153,15 @@ export default function PracticePage(): ReactElement {
               Your progress
             </h2>
             <ProgressChart refreshKey={completedCount} />
+          </div>
+        </section>
+
+        <section className="block-tight">
+          <div className="wrap">
+            <h2 style={{ fontSize: "var(--step-2)", marginBottom: "1rem" }}>
+              Progress report
+            </h2>
+            <ProgressReportPanel completedCount={completedCount} />
           </div>
         </section>
 
