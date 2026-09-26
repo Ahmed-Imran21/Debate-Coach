@@ -1,8 +1,11 @@
 import { tokenExpiresAt } from "./jwt";
 import type {
+  LatestProgressReport,
   ProgressMetric,
   ProgressPoint,
   ProgressRange,
+  ProgressReport,
+  ReportSessionCount,
   SessionCreated,
   SessionReport,
   SessionSummary,
@@ -466,6 +469,26 @@ export function getProgress(
 ): Promise<ProgressPoint[]> {
   const query = new URLSearchParams({ metric, range });
   return request<ProgressPoint[]>(`/v1/sessions/progress?${query}`);
+}
+
+/* ---------------------------------------------------------- */
+/* AI progress report                                          */
+/* ---------------------------------------------------------- */
+
+// One LLM call behind it (the backend waits up to 30s for capacity,
+// then writes the report), so well past the 30s default.
+export const PROGRESS_REPORT_TIMEOUT_MS = 120_000;
+
+export function createProgressReport(sessionCount: ReportSessionCount): Promise<ProgressReport> {
+  return request<ProgressReport>("/v1/progress-reports", {
+    method: "POST",
+    body: { session_count: sessionCount },
+    timeoutMs: PROGRESS_REPORT_TIMEOUT_MS,
+  });
+}
+
+export function getLatestProgressReport(): Promise<LatestProgressReport> {
+  return request<LatestProgressReport>("/v1/progress-reports/latest");
 }
 
 export function getReport(id: string): Promise<SessionReport> {
