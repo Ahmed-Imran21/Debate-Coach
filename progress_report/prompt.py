@@ -20,9 +20,15 @@ changed, which specific feedback points recur, and which is the
 clearest improvement. Left to infer these, the model described a
 point from one session as "still" a problem, and missed a level that
 had gone up. A point is only marked as recurring when the match is
-strict (same area, same kind, near-identical wording); when unsure,
-it isn't, and an area with a weakness in several sessions but no
-recurring point is reported as exactly that.
+certain (same area, same kind, and near-identical wording or one
+title's words wholly inside the other's). Word matching can confirm
+"same", but it can never confirm "different": "Insufficient evidence
+for claims" and "Insufficient concrete evidence" share one word and
+are the same issue. So an area with a weakness in several sessions
+and no confirmed recurring point is reported neutrally, as weak in
+those sessions, and the model is told not to say whether it was the
+same issue or a different one. (Calling those "a different one each
+time" put a false statement in a real report.)
 """
 
 from __future__ import annotations
@@ -31,7 +37,7 @@ import json
 import re
 from typing import Any, Optional
 
-PROMPT_VERSION = "progress-report-1.2"
+PROMPT_VERSION = "progress-report-1.3"
 
 MAX_BULLETS = 5
 
@@ -71,7 +77,7 @@ Use the trends block as the facts. Do not work out your own trends from the sess
 - trends.levels says, per area, whether the level improved, got worse or stayed the same from the earliest to the most recent session.
 - trends.delivery says the same for pace, filler words, stutters and pauses.
 - trends.recurring_points lists the only specific feedback points that appear in more than one session.
-- trends.areas_with_different_weaknesses lists areas that had a weakness in several sessions, but a different one each time.
+- trends.areas_weak_in_several_sessions lists areas that had a weakness in several sessions where it is NOT known whether it was the same issue.
 - trends.clearest_improvement names the single clearest improvement, if there is one.
 - trends.got_worse lists every level or delivery habit that got worse.
 
@@ -79,7 +85,7 @@ Rules:
 - If trends.clearest_improvement is set, your first bullet is about it.
 - Mention every item in trends.got_worse. Never describe something as solid, good, strong or steady if it is in trends.got_worse.
 - Describe a specific point as continuing, persisting or "still" there ONLY if it is in trends.recurring_points. A point that appears in one session is not a trend.
-- For an area in trends.areas_with_different_weaknesses, say it was a weak spot in those sessions for different reasons. Never suggest one issue carried over.
+- For an area in trends.areas_weak_in_several_sessions, say only that it was a weak spot in those sessions. Do not say it was the same issue, and do not say it was a different one: that is not known.
 - Put improvements before purely negative points, and include at least one improvement or strength when the data has one.
 - State only what the data says. Never give a reason or cause for a change (not "thanks to better evidence", not "because you practised").
 - Keep each point under its own area: a rebuttal point is about rebuttal, a persuasion point about persuasion, and so on. Never file one area's point under another.
@@ -328,13 +334,22 @@ def _tokens(title: str) -> frozenset[str]:
 
 
 def _same_point(a: dict, b: dict) -> bool:
-    """Strict on purpose: when unsure, it's not the same point."""
+    """
+    Certain matches only: near-identical wording, or every content
+    word of the shorter title (at least two of them) inside the
+    longer one ("Red herring fallacy" inside "Red herring fallacy
+    undermines logical credibility"). Anything less is unknown, never
+    "different".
+    """
     if a["area"] != b["area"] or (a["kind"] == "strength") != (b["kind"] == "strength"):
         return False
     ta, tb = _tokens(a["point"]), _tokens(b["point"])
     if not ta or not tb:
         return False
-    return len(ta & tb) / len(ta | tb) >= 0.6
+    if len(ta & tb) / len(ta | tb) >= 0.6:
+        return True
+    shorter, longer = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    return len(shorter) >= 2 and shorter <= longer
 
 
 def _recurrence(summaries: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -361,7 +376,7 @@ def _recurrence(summaries: list[dict]) -> tuple[list[dict], list[dict]]:
     ]
 
     recurring_weak_areas = {r["area"] for r in recurring if r["kind"] == "weakness"}
-    different = []
+    unknown = []
     for area in CONTENT_CATEGORIES + ("gaze", "gestures", "head", "integration"):
         weak_sessions = [
             _name(s)
@@ -369,14 +384,14 @@ def _recurrence(summaries: list[dict]) -> tuple[list[dict], list[dict]]:
             if any(p["area"] == area and p["kind"] != "strength" for p in s["content_feedback"] + s.get("visual_feedback", []))
         ]
         if len(weak_sessions) > 1 and area not in recurring_weak_areas:
-            different.append({"area": area, "sessions": _join(weak_sessions, total), "note": "a weakness in each of these sessions, but a different one each time"})
-    return recurring, different
+            unknown.append({"area": area, "sessions": _join(weak_sessions, total), "note": "a weak spot in each of these sessions; whether it was the same issue is not known"})
+    return recurring, unknown
 
 
 def build_trends(summaries: list[dict]) -> dict:
     levels, level_improvements, level_worse = _level_trends(summaries)
     delivery, delivery_improvements, delivery_worse = _delivery_trends(summaries)
-    recurring, different = _recurrence(summaries)
+    recurring, weak_several = _recurrence(summaries)
 
     # Biggest level jump first (overall wins a tie, being first), then
     # delivery; None if nothing improved.
@@ -386,7 +401,7 @@ def build_trends(summaries: list[dict]) -> dict:
         "levels": levels,
         "delivery": delivery,
         "recurring_points": recurring,
-        "areas_with_different_weaknesses": different,
+        "areas_weak_in_several_sessions": weak_several,
         "clearest_improvement": ranked[0][1] if ranked else None,
         # Every one of these must be mentioned (see SYSTEM_PROMPT).
         "got_worse": level_worse + delivery_worse,
