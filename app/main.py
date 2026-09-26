@@ -14,7 +14,7 @@ from app.core.config import settings
 from app.core.last_seen import LastSeenMiddleware
 from app.core.rate_limit import PerClientRateLimitMiddleware
 from app.db.database import Base, engine as db_engine
-from app.routes import admin, auth, sessions, users
+from app.routes import admin, auth, progress_reports, sessions, users
 from app.services import cleanup, engine, jobs
 from app.services.audio_convert import ffmpeg_available
 
@@ -134,6 +134,7 @@ app.add_middleware(LastSeenMiddleware)
 app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(users.router, prefix=API_PREFIX)
 app.include_router(sessions.router, prefix=API_PREFIX)
+app.include_router(progress_reports.router, prefix=API_PREFIX)
 app.include_router(admin.router, prefix=API_PREFIX)
 
 

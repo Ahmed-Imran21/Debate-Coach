@@ -528,3 +528,27 @@ export interface ProgressPoint {
   /** null when the session has no score for this metric (rebuttal with nothing to rebut). */
   score: number | null;
 }
+
+/* ---------------------------------------------------------- */
+/* AI progress report (/v1/progress-reports)                   */
+/* ---------------------------------------------------------- */
+
+export type ReportSessionCount = 3 | 5 | 7;
+
+export interface ProgressReport {
+  id: string;
+  /** The UTC day it was generated on, "YYYY-MM-DD". */
+  report_date: string;
+  created_at: string;
+  session_count_requested: number;
+  session_count_used: number;
+  /** At most 5. */
+  bullets: string[];
+}
+
+export interface LatestProgressReport {
+  report: ProgressReport | null;
+  can_generate: boolean;
+  /** Set when today's (UTC) report exists: the next UTC midnight. */
+  next_available_at: string | null;
+}
