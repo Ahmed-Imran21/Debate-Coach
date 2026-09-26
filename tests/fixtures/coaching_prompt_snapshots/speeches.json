@@ -1,0 +1,78 @@
+{
+  "plain": {
+    "session_id": "snap-plain",
+    "segments": [
+      {
+        "start": 0.5,
+        "end": 2.6,
+        "text": "The motion is clearly justified.",
+        "labels": [
+          "claim"
+        ]
+      },
+      {
+        "start": 3.1,
+        "end": 5.2,
+        "text": "This evidence is overwhelming.",
+        "labels": [
+          "reasoning"
+        ]
+      },
+      {
+        "start": 6.0,
+        "end": 7.7,
+        "text": "They never answered it.",
+        "labels": [
+          "conclusion"
+        ]
+      }
+    ]
+  },
+  "other_side_split": {
+    "session_id": "snap-other",
+    "segments": [
+      {
+        "start": 0.9,
+        "end": 7.3,
+        "text": "We cannot justify spending billions on prestige projects.",
+        "labels": [
+          "claim"
+        ]
+      },
+      {
+        "start": 7.3,
+        "end": 12.0,
+        "text": "Proponents promise vague long technological spillovers but our planetary",
+        "labels": [
+          "claim"
+        ]
+      },
+      {
+        "start": 12.0,
+        "end": 15.5,
+        "text": "emergencies are happening right now.",
+        "labels": [
+          "claim",
+          "reasoning"
+        ]
+      }
+    ]
+  },
+  "empty": {
+    "session_id": "snap-empty",
+    "segments": []
+  },
+  "unicode": {
+    "session_id": "snap-unicode",
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 3.0,
+        "text": "Naïve policies — like this one — cost ₹ crores; critics say otherwise.",
+        "labels": [
+          "claim"
+        ]
+      }
+    ]
+  }
+}

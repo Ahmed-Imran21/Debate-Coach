@@ -4,14 +4,18 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 
+import MotionPicker from "@/components/MotionPicker";
 import {
   ApiError,
   createSession,
+  getMotions,
   putToSignedUrl,
   startSession,
   uploadAndStart,
   type VideoFinalize,
 } from "@/lib/api";
+import { findMotion } from "@/lib/motions";
+import type { Motion } from "@/lib/types";
 import { formatClock } from "@/components/SpeechTrack";
 import ConsentPanel from "@/components/video-analysis/ConsentPanel";
 import SetupScreen from "@/components/video-analysis/SetupScreen";
@@ -57,6 +61,16 @@ export default function Recorder(): ReactElement {
   const [error, setError] = useState<string | null>(null);
   const [supported, setSupported] = useState(true);
   const [consent, setConsent] = useState<ConsentChoice | null>(null);
+  // Practice motion: null is "No prompt", the default.
+  const [motions, setMotions] = useState<Motion[]>([]);
+  const [motionsFailed, setMotionsFailed] = useState(false);
+  const [motionId, setMotionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    getMotions()
+      .then(setMotions)
+      .catch(() => setMotionsFailed(true));
+  }, []);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -373,7 +387,7 @@ export default function Recorder(): ReactElement {
       if (!usingVideoRef.current && videoOutcomeRef.current === null) {
         // No video analysis was ever in play: the exact path this
         // app has always used.
-        const id = await uploadAndStart(blob, title.trim() || null);
+        const id = await uploadAndStart(blob, title.trim() || null, motionId);
         router.push(`/practice/${id}`);
         return;
       }
@@ -387,6 +401,7 @@ export default function Recorder(): ReactElement {
         content_type: contentType,
         title: title.trim() || null,
         video_analysis: "requested",
+        ...(motionId ? { motion_id: motionId } : {}),
       });
 
       await putToSignedUrl(created.upload_url, created.upload_headers, blob);
@@ -460,6 +475,7 @@ export default function Recorder(): ReactElement {
   // The camera is live for exactly these phases. Outside them the
   // stream is already stopped, so there is no frame loop left to
   // protect and display:none is safe.
+  const chosenMotion = findMotion(motions, motionId);
   const cameraLive = phase === "setup" || phase === "recording";
   // During setup the preview is the whole point (you can't act on
   // "move closer" without it). During recording it's opt-in.
@@ -548,6 +564,7 @@ export default function Recorder(): ReactElement {
             {VIDEO_ANALYSIS_ENABLED && consent === "in" && " Visual feedback is on."}
             {VIDEO_ANALYSIS_ENABLED && consent === "out" && " Visual feedback is off."}
           </p>
+          <MotionPicker motions={motions} value={motionId} onChange={setMotionId} loadFailed={motionsFailed} />
           <div className="btn-row">
             <button className="btn" type="button" onClick={startRecording}>
               Start recording
@@ -575,6 +592,11 @@ export default function Recorder(): ReactElement {
 
       {phase === "recording" && (
         <>
+          {chosenMotion && (
+            <p className="note" style={{ marginBottom: "0.75rem" }}>
+              {chosenMotion.description}
+            </p>
+          )}
           <p className="timer" aria-live="off">
             {formatClock(elapsed)}
           </p>
@@ -629,6 +651,14 @@ export default function Recorder(): ReactElement {
               style={{ width: "100%", margin: "1rem 0 1.25rem" }}
             />
           )}
+
+          <MotionPicker
+            motions={motions}
+            value={motionId}
+            onChange={setMotionId}
+            disabled={phase === "uploading"}
+            loadFailed={motionsFailed}
+          />
 
           <label className="field">
             <span>Name this session (optional)</span>

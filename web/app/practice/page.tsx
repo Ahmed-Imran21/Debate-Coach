@@ -232,6 +232,7 @@ function SessionRow({
         <div className="row-title">{name}</div>
 
         <div className="row-meta">
+          {session.motion && <>Motion: {session.motion.title}. </>}
           {done ? (
             <>
               {recorded}. {formatClock(session.duration_seconds ?? 0)} of

@@ -22,6 +22,7 @@ from app.schemas.session import (
     SessionOut,
     SessionReportOut,
     SessionStartRequest,
+    motion_out,
 )
 from app.services import jobs, pipeline, storage, visual_signals
 from app.services.category_scores import CATEGORY_COLUMNS
@@ -95,6 +96,7 @@ def _apply_video_fields(target: SessionOut | SessionCreateResponse, video: Video
 
 def _session_out(debate_session: DebateSession, video: VideoAnalysis | None) -> SessionOut:
     out = SessionOut.model_validate(debate_session)
+    out.motion = motion_out(debate_session.motion_id)
     _apply_video_fields(out, video)
     return out
 
@@ -146,6 +148,7 @@ def create_session(
         user_id=current_user.id,
         title=payload.title,
         status=SessionStatus.created,
+        motion_id=payload.motion_id,
     )
 
     db.add(debate_session)
@@ -572,6 +575,7 @@ def get_session_report(
         title=debate_session.title,
         status=debate_session.status,
         created_at=debate_session.created_at,
+        motion=motion_out(debate_session.motion_id),
         scores=coaching.get("scores", {}),
         feedback=coaching.get("feedback", []),
         raw_metrics=raw_metrics,

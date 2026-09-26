@@ -307,6 +307,12 @@ function Report({ report }: { report: SessionReport }): ReactElement {
 
       <p className="note" style={{ margin: "0.5rem 0 2rem" }}>
         Recorded {recorded}
+        {report.motion && (
+          <>
+            <br />
+            Motion: {report.motion.description}
+          </>
+        )}
       </p>
 
       <div className="figures" style={{ marginBottom: "2rem" }}>

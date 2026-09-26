@@ -51,6 +51,7 @@ from speech_analysis.llm.client import SpeechAnalysisValidationError
 from speech_analysis.speech_analyzer import analyze_speech
 
 from coaching_engine.engine import CoachingEngine
+from coaching_engine.llm.prompts import PracticeMotion
 from coaching_engine.utils.result_writer import save_coaching_results
 
 from visual_analysis.pipeline import VideoAnalysisResult, run_pipeline
@@ -62,6 +63,7 @@ from app.core.config import settings
 from app.db.database import SessionLocal
 from app.models.session import DebateSession, SessionStatus
 from app.models.video_analysis import SessionMetric, VideoAnalysis
+from app.motions import get_motion
 from app.services.category_scores import CATEGORY_COLUMNS
 from app.services import engine, storage, visual_signals
 from app.services.audio_convert import (
@@ -323,11 +325,7 @@ def _run(
 
     mark(SessionStatus.coaching)
 
-    coaching_engine = CoachingEngine(
-        sessions_dir=str(workdir),
-        api_client=api_client,
-        on_queued=on_queued,
-    )
+    coaching_engine = _build_coaching_engine(workdir, api_client, on_queued, debate_session)
 
     feedback, scores = coaching_engine.analyze_session(
         session_id=session_id,
@@ -623,6 +621,33 @@ def _upload_artifacts(
         )
 
         setattr(debate_session, column, object_key)
+
+
+def _build_coaching_engine(
+    workdir: Path,
+    api_client: Any,
+    on_queued: Callable[[float], None],
+    debate_session: DebateSession,
+) -> CoachingEngine:
+    return CoachingEngine(
+        sessions_dir=str(workdir),
+        api_client=api_client,
+        on_queued=on_queued,
+        motion=coaching_motion(debate_session),
+    )
+
+
+def coaching_motion(debate_session: DebateSession) -> Optional[PracticeMotion]:
+    """
+    The session's practice motion as plain text for the coaching
+    engine, or None ("No prompt"). Looked up in app/motions.py, so a
+    retired motion still resolves for the sessions that used it.
+    """
+
+    motion = get_motion(debate_session.motion_id)
+    if motion is None:
+        return None
+    return PracticeMotion(title=motion.title, wording=motion.description)
 
 
 def _record_summary(

@@ -3,9 +3,10 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.session import SessionStatus
+from app.motions import get_motion, is_selectable
 
 
 # Formats a browser MediaRecorder actually produces, plus the
@@ -39,6 +40,30 @@ class SessionCreateRequest(BaseModel):
     # Opt in to visual analysis for this session. Ignored (treated
     # as not_requested) when VIDEO_ANALYSIS_ENABLED is false.
     video_analysis: Literal["requested", "not_requested"] = "not_requested"
+
+    # A practice motion from GET /v1/motions, or null/absent for "No
+    # prompt". Only ids from app/motions.py are accepted, never free
+    # text: the motion's wording goes into the coaching prompt.
+    motion_id: str | None = None
+
+    @field_validator("motion_id")
+    @classmethod
+    def _known_motion(cls, value: str | None) -> str | None:
+        if value is not None and not is_selectable(value):
+            raise ValueError("Unknown motion.")
+        return value
+
+
+class MotionOut(BaseModel):
+    id: str
+    title: str
+    description: str
+
+
+def motion_out(motion_id: str | None) -> MotionOut | None:
+    """A stored motion id as shown to the client; retired ones still resolve."""
+    motion = get_motion(motion_id)
+    return None if motion is None else MotionOut(id=motion.id, title=motion.title, description=motion.description)
 
 
 class VideoFinalize(BaseModel):
@@ -106,6 +131,9 @@ class SessionOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # The practice motion, or null for "No prompt".
+    motion: MotionOut | None = None
+
     # Video track. Always present; "not_requested" when the
     # session never asked for it or the feature is off.
     video_analysis_status: str = "not_requested"
@@ -137,6 +165,9 @@ class SessionReportOut(BaseModel):
     title: str | None
     status: SessionStatus
     created_at: datetime
+
+    # The practice motion, or null for "No prompt".
+    motion: MotionOut | None = None
 
     # rebuttal is null when the speech had nothing to rebut: "not
     # scored", not zero (coaching_engine/models/scores.py).

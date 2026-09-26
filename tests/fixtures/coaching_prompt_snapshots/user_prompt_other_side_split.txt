@@ -1,0 +1,37 @@
+
+Review this practice speech. Give 3-6 synthesized feedback items and a rubric level for each of: argumentation, rebuttal, structure, persuasion, logic.
+
+These passages name an opposing side, so rebuttal is applicable and must be scored 1-5 on how well the speaker answers them:
+- "Proponents promise vague long technological spillovers but our planetary emergencies are happening right now."
+
+SPEECH (labelled segments):
+{
+  "session_id": "snap-other",
+  "segments": [
+    {
+      "start": 0.9,
+      "end": 7.3,
+      "text": "We cannot justify spending billions on prestige projects.",
+      "labels": [
+        "claim"
+      ]
+    },
+    {
+      "start": 7.3,
+      "end": 12.0,
+      "text": "Proponents promise vague long technological spillovers but our planetary",
+      "labels": [
+        "claim"
+      ]
+    },
+    {
+      "start": 12.0,
+      "end": 15.5,
+      "text": "emergencies are happening right now.",
+      "labels": [
+        "claim",
+        "reasoning"
+      ]
+    }
+  ]
+}
