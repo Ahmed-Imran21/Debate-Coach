@@ -26,6 +26,7 @@ from app.schemas.session import (
 )
 from app.schemas.share import ShareCreatedOut, ShareStatusOut
 from app.services import jobs, pipeline, shares, storage, visual_signals
+from app.motions import motion_not_applied
 from app.services.category_scores import CATEGORY_COLUMNS
 from visual_analysis import config as visual_config
 from visual_analysis.signals import SignalValidationError
@@ -586,6 +587,7 @@ def get_session_report(
         status=debate_session.status,
         created_at=debate_session.created_at,
         motion=motion_out(debate_session.motion_id),
+        motion_not_applied=motion_not_applied(debate_session),
         scores=coaching.get("scores", {}),
         feedback=coaching.get("feedback", []),
         raw_metrics=raw_metrics,

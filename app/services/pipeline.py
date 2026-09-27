@@ -338,14 +338,10 @@ def _run(
         sessions_dir=str(workdir),
     )
 
-    if coaching_engine.llm_errors:
-        # Categories where the LLM pass failed still produced
-        # deterministic feedback, so the run is not a failure.
-        # Record which ones degraded for debugging.
-        debate_session.extra = {
-            **(debate_session.extra or {}),
-            "llm_errors": coaching_engine.llm_errors,
-        }
+    # A fallback to the rule-based coaching still produced feedback,
+    # so the run is not a failure. Record it (the report uses it to
+    # say a practice motion couldn't be applied).
+    _record_llm_errors(debate_session, coaching_engine.llm_errors)
 
     # ---------------------------------------------------------
     # 5b. Visual coaching (optional, best-effort, separate LLM call)
@@ -621,6 +617,24 @@ def _upload_artifacts(
         )
 
         setattr(debate_session, column, object_key)
+
+
+def _record_llm_errors(debate_session: DebateSession, errors: dict) -> None:
+    """
+    This run's LLM errors, replacing any from an earlier run. A failed
+    session can be re-run, and a stale "synthesis" error left over from
+    a run that fell back would otherwise mark a clean re-run as having
+    fallen back too.
+    """
+
+    extra = dict(debate_session.extra or {})
+    if errors:
+        extra["llm_errors"] = dict(errors)
+    elif "llm_errors" in extra:
+        del extra["llm_errors"]
+    else:
+        return
+    debate_session.extra = extra
 
 
 def _build_coaching_engine(

@@ -81,3 +81,18 @@ describe("motions API", () => {
     ]);
   });
 });
+
+describe("fallback note", () => {
+  it("shows only when a motion was set and coaching couldn't use it", async () => {
+    const { MOTION_NOT_APPLIED_NOTE, motionFallbackNote } = await import("../motions");
+    const motion = { description: "This house would introduce a carbon tax." };
+
+    expect(MOTION_NOT_APPLIED_NOTE).toBe(
+      "This session's coaching couldn't use your practice prompt, so it wasn't judged against the motion.",
+    );
+    expect(motionFallbackNote(motion, true)).toBe(MOTION_NOT_APPLIED_NOTE);
+    expect(motionFallbackNote(motion, false)).toBeNull();
+    expect(motionFallbackNote(motion, undefined)).toBeNull();
+    expect(motionFallbackNote(null, true)).toBeNull();
+  });
+});

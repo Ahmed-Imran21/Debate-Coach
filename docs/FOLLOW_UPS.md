@@ -21,29 +21,6 @@ own 120s timeout, so it isn't affected.
 2. A longer timeout, or one automatic retry, for the first request a
    page makes, so a cold start costs a delay instead of an error.
 
-## The rule-based fallback ignores the practice motion
-
-**Seen:** 2026-09-26, while testing practice motions. One of six
-coaching runs got two responses missing part of the rubric in a row,
-so the engine fell back to the deterministic rule modules. Those can't
-read a motion, so a speech recorded against an unrelated motion (the
-space-debate recording against the carbon-tax motion) got no
-off-topic feedback, and it was scored as if no motion had been set.
-
-**Why it matters:** the report shows the motion, so the user expects
-coaching against it. On the fallback path they silently don't get it.
-Fallbacks are rare (a double missing-rubric response, or the LLM
-being unavailable), but they happen.
-
-**Options (not done):**
-1. Show a note on the report when a motion was set but coaching fell
-   back. The pipeline already records `llm_errors` in the session's
-   `extra`.
-2. Add a simple deterministic relevance check to the fallback, for
-   example keyword overlap between the motion and the transcript, that
-   adds one "may not address the motion" item. It's cheap, but crude:
-   it has to stay conservative to avoid false alarms.
-
 ## An intermittent backend test failure, not yet identified
 
 **Seen:** 2026-09-26, on the feature/practice-prompts branch. One of

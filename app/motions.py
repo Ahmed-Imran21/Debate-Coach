@@ -77,6 +77,21 @@ def get_motion(motion_id: Optional[str]) -> Optional[Motion]:
     return _BY_ID.get(motion_id)
 
 
+def motion_not_applied(session) -> bool:
+    """
+    True when the session had a practice motion but its coaching fell
+    back to the rule-based path (both LLM attempts failed; the pipeline
+    records that as llm_errors["synthesis"]). The rule modules can't
+    read a motion, so the report says the speech wasn't judged against
+    it.
+    """
+
+    if session.motion_id is None:
+        return False
+    errors = (session.extra or {}).get("llm_errors") or {}
+    return "synthesis" in errors
+
+
 def is_selectable(motion_id: str) -> bool:
     """What a new session may pick: known and not retired."""
     motion = _BY_ID.get(motion_id)

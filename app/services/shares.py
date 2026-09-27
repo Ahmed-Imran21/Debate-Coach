@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from app.models.session import DebateSession, SessionStatus
 from app.models.session_share import SessionShare
 from app.models.video_analysis import VideoAnalysis
-from app.motions import get_motion
+from app.motions import get_motion, motion_not_applied
 from app.schemas.share import (
     SharedDelivery,
     SharedFeedbackItem,
@@ -195,6 +195,7 @@ def build_shared_report(db: Session, session: DebateSession) -> Optional[SharedR
         title=session.title,
         recorded_at=session.created_at,
         motion=SharedMotion(title=motion.title, description=motion.description) if motion else None,
+        motion_not_applied=motion_not_applied(session),
         scores={key: _number(raw_scores.get(key)) for key in SCORE_KEYS},
         feedback=feedback,
         delivery=SharedDelivery(

@@ -18,3 +18,12 @@ export function findMotion(motions: Motion[], id: string | null): Motion | null 
   if (id === null) return null;
   return motions.find((m) => m.id === id) ?? null;
 }
+
+/** Shown under the motion line when the rule-based fallback coached the session. */
+export const MOTION_NOT_APPLIED_NOTE =
+  "This session's coaching couldn't use your practice prompt, so it wasn't judged against the motion.";
+
+/** The note to show, if any: only when there was a motion and coaching couldn't use it. */
+export function motionFallbackNote(motion: { description: string } | null, notApplied: boolean | undefined): string | null {
+  return motion && notApplied ? MOTION_NOT_APPLIED_NOTE : null;
+}

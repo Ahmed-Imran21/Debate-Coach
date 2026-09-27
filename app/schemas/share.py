@@ -124,6 +124,8 @@ class SharedReportOut(_Whitelist):
     title: str | None
     recorded_at: datetime
     motion: SharedMotion | None
+    # A motion was set but coaching fell back and couldn't use it.
+    motion_not_applied: bool = False
     scores: dict[str, float | None]
     feedback: list[SharedFeedbackItem]
     delivery: SharedDelivery

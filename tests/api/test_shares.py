@@ -116,7 +116,7 @@ def share(api, owner, session):
 # ---------------------------------------------------------------
 
 EXPECTED_KEYS = {
-    "": {"title", "recorded_at", "motion", "scores", "feedback", "delivery", "video_analysis_status",
+    "": {"title", "recorded_at", "motion", "motion_not_applied", "scores", "feedback", "delivery", "video_analysis_status",
          "video_unavailable_reason", "visual_coaching_status", "video_analysis", "correlated_moments", "visual_feedback"},
     "motion": {"title", "description"},
     "scores": {"quantitative", "argumentation", "rebuttal", "structure", "persuasion", "logic", "overall"},

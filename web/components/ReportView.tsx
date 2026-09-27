@@ -7,6 +7,7 @@ import { flushSync } from "react-dom";
 import KeyMomentsList from "@/components/KeyMomentsList";
 import { formatClock } from "@/components/SpeechTrack";
 import VisualDeliverySection from "@/components/VisualDeliverySection";
+import { motionFallbackNote } from "@/lib/motions";
 import {
   CATEGORY_LABEL,
   type Category,
@@ -43,6 +44,8 @@ export interface ReportViewData {
   /** When the speech was recorded (ISO). */
   recordedAt: string;
   motion: { description: string } | null;
+  /** Coaching fell back and couldn't use the motion. */
+  motionNotApplied?: boolean;
   scores: Partial<Record<Category | "overall", number | null>>;
   feedback: FindingView[];
   delivery: {
@@ -99,6 +102,7 @@ export default function ReportView({
   }
 
   const { delivery } = data;
+  const fallbackNote = motionFallbackNote(data.motion, data.motionNotApplied);
 
   return (
     <>
@@ -110,6 +114,12 @@ export default function ReportView({
           <>
             <br />
             Motion: {data.motion.description}
+          </>
+        )}
+        {fallbackNote && (
+          <>
+            <br />
+            {fallbackNote}
           </>
         )}
       </p>

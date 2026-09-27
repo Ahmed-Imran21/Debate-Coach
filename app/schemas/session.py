@@ -171,6 +171,9 @@ class SessionReportOut(BaseModel):
 
     # The practice motion, or null for "No prompt".
     motion: MotionOut | None = None
+    # True when a motion was set but coaching fell back to the rules,
+    # which can't use it: the report says so under the motion.
+    motion_not_applied: bool = False
 
     # rebuttal is null when the speech had nothing to rebut: "not
     # scored", not zero (coaching_engine/models/scores.py).
