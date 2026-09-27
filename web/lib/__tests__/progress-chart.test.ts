@@ -14,7 +14,9 @@ import {
   buildChart,
   describeChart,
   formatDate,
+  placeTooltip,
   scoredPoints,
+  tooltipLines,
 } from "../progress-chart";
 import type { ProgressPoint } from "../types";
 
@@ -124,5 +126,64 @@ describe("getProgress", () => {
     expect(urls.map((u) => u.replace(/^https?:\/\/[^/]+/, ""))).toEqual([
       "/v1/sessions/progress?metric=rebuttal&range=1w",
     ]);
+  });
+});
+
+describe("tooltip", () => {
+  const point = { title: "Second constructive, nuclear energy", createdAt: "2026-09-26T12:00:00Z", score: 57.6 };
+
+  it("shows the title, the date and the score being charted", () => {
+    expect(tooltipLines(point, "Logic", "en-GB", "UTC")).toEqual([
+      "Second constructive, nuclear energy",
+      expect.stringMatching(/^26 Sep/),
+      "Logic: 58",
+    ]);
+  });
+
+  it("labels the All view as Overall", () => {
+    expect(tooltipLines(point, "All", "en-GB", "UTC")[2]).toBe("Overall: 58");
+  });
+
+  it("falls back to 'Session of <date>' like the session list", () => {
+    const [name, date] = tooltipLines({ ...point, title: null }, "All", "en-GB", "UTC");
+    expect(name).toBe(`Session of ${date}`);
+    expect(tooltipLines({ ...point, title: "" }, "All", "en-GB", "UTC")[0]).toBe(`Session of ${date}`);
+  });
+
+  it("carries each session's title through the chart, null when there is none", () => {
+    const chart = buildChart([{ ...pt(1, 40), title: "Named" }, pt(2, 60)]);
+    expect(chart.points.map((p) => p.title)).toEqual(["Named", null]);
+  });
+});
+
+describe("placeTooltip", () => {
+  const W = 600;
+
+  it("opens up and to the right by default", () => {
+    expect(placeTooltip(200, 150, 120, 60, W)).toEqual({ left: 210, top: 80, openLeft: false, openBelow: false });
+  });
+
+  it("opens to the left near the right edge", () => {
+    const placed = placeTooltip(560, 150, 120, 60, W);
+    expect(placed.openLeft).toBe(true);
+    expect(placed.left).toBe(560 - 10 - 120);
+    expect(placed.left + 120).toBeLessThanOrEqual(W);
+  });
+
+  it("opens below the dot near the top", () => {
+    const placed = placeTooltip(200, 20, 120, 60, W);
+    expect(placed.openBelow).toBe(true);
+    expect(placed.top).toBe(30);
+  });
+
+  it("never leaves the container, even when it barely fits", () => {
+    for (const x of [0, 5, 60, 300, 590, 600]) {
+      for (const y of [0, 10, 200]) {
+        const { left, top } = placeTooltip(x, y, 150, 60, 320);
+        expect(left).toBeGreaterThanOrEqual(0);
+        expect(left + 150).toBeLessThanOrEqual(320);
+        expect(top).toBeGreaterThanOrEqual(0);
+      }
+    }
   });
 });

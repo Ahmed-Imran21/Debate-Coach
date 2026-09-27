@@ -52,6 +52,7 @@ export const DEFAULT_BOX: ChartBox = {
 export interface PlottedPoint {
   sessionId: string;
   createdAt: string;
+  title: string | null;
   score: number;
   x: number;
   y: number;
@@ -98,6 +99,7 @@ export function buildChart(points: ProgressPoint[], box: ChartBox = DEFAULT_BOX)
   const plotted = scored.map((p, i) => ({
     sessionId: p.session_id,
     createdAt: p.created_at,
+    title: p.title ?? null,
     score: p.score,
     x: box.left + i * step,
     y: yFor(p.score),
@@ -129,4 +131,62 @@ export function describeChart(chart: Chart, metricLabel: string, timeZone?: stri
     `from ${Math.round(first.score)} on ${formatDate(first.createdAt, timeZone)} ` +
     `to ${Math.round(last.score)} on ${formatDate(last.createdAt, timeZone)}.`
   );
+}
+
+/* ---------------------------------------------------------- */
+/* Tooltip                                                     */
+/* ---------------------------------------------------------- */
+
+/**
+ * "26 Sept 2026" in the viewer's locale: the same format the session
+ * list uses, so a point's name matches its row there.
+ */
+export function formatRecordedDate(iso: string, locale?: string, timeZone?: string): string {
+  return new Date(iso).toLocaleDateString(locale, { day: "numeric", month: "short", year: "numeric", timeZone });
+}
+
+/** The tooltip's three lines: name, date, and the score being shown. */
+export function tooltipLines(
+  point: Pick<PlottedPoint, "title" | "createdAt" | "score">,
+  metricLabel: string,
+  locale?: string,
+  timeZone?: string,
+): [string, string, string] {
+  const date = formatRecordedDate(point.createdAt, locale, timeZone);
+  const name = point.title || `Session of ${date}`; // the session list's fallback
+  const what = metricLabel === "All" ? "Overall" : metricLabel;
+  return [name, date, `${what}: ${Math.round(point.score)}`];
+}
+
+export interface TooltipPlacement {
+  left: number;
+  top: number;
+  openLeft: boolean;
+  openBelow: boolean;
+}
+
+/**
+ * Where to put a tooltip of the given size next to a point at (x, y),
+ * all in pixels within a container `containerWidth` wide. It opens up
+ * and to the right by default, to the left near the right edge, below
+ * near the top, and is clamped so it never leaves the container.
+ */
+export function placeTooltip(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  containerWidth: number,
+  gap = 10,
+): TooltipPlacement {
+  const openLeft = x + gap + width > containerWidth;
+  const openBelow = y - gap - height < 0;
+  const left = openLeft ? x - gap - width : x + gap;
+  const top = openBelow ? y + gap : y - gap - height;
+  return {
+    left: Math.max(0, Math.min(left, containerWidth - width)),
+    top: Math.max(0, top),
+    openLeft,
+    openBelow,
+  };
 }
