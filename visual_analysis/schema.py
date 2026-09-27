@@ -39,7 +39,10 @@ class ModelInfo(_Strict):
 
 
 class Source(_Strict):
-    platform: Literal["web"]
+    # "android": the native app (android/), which extracts the same
+    # signals with MediaPipe Tasks Vision for Android. Stored on the
+    # video rows as-is; nothing downstream branches on it.
+    platform: Literal["web", "android"]
     client_version: str
     user_agent_family: Literal["chrome", "edge", "firefox", "safari", "other"]
     runtime: RuntimeInfo
