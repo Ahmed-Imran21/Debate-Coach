@@ -29,7 +29,21 @@ Balance: include at least one strength if any moment has polarity strength or an
 
 Maximum 6 items. Each coaching field: 1 to 3 sentences, plain English, no em dashes, no emojis.
 
-Output only JSON matching the schema."""
+Output only JSON with exactly this shape and these keys, nothing else:
+{
+  "visual_feedback": [
+    {
+      "id": "vf_1",
+      "category": "gaze" | "gestures" | "head" | "integration" | "coverage",
+      "polarity": "strength" | "improve" | "neutral",
+      "moment_id": the id of one of the provided moments, or null,
+      "metric_keys": [keys of provided metrics whose status is ok],
+      "observation_ids": [ids of observations within that moment],
+      "coaching": "the coaching text"
+    }
+  ],
+  "summary": "one or two sentences summarising the visual delivery"
+}"""
 
 
 # Metrics built from the camera-facing cone (§5.3's `facing`) --

@@ -130,3 +130,17 @@ def test_build_input_payload_is_json_serializable_and_includes_speech_duration()
     payload = build_input_payload(_video_analysis(), [], [], speech_duration_s=391.2)
     assert payload["context"]["speech_duration_s"] == 391.2
     json.dumps(payload)  # must not raise
+
+
+def test_the_system_prompt_spells_out_the_response_schema():
+    # The validator rejects the whole response on any key mismatch, so
+    # the model must be told every key it checks. Without this the model
+    # invented its own shape ({"coaching": [...]}) and every real
+    # session's visual feedback failed.
+    from visual_coaching.prompt import SYSTEM_PROMPT
+    from visual_coaching.validator import CATEGORIES, POLARITIES, VisualFeedbackItem, VisualFeedbackResponse
+
+    for key in list(VisualFeedbackResponse.model_fields) + list(VisualFeedbackItem.model_fields):
+        assert f'"{key}"' in SYSTEM_PROMPT, key
+    for value in CATEGORIES + POLARITIES:
+        assert f'"{value}"' in SYSTEM_PROMPT, value

@@ -34,7 +34,7 @@ from . import validator as validator_module
 logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = "1.0"
-PROMPT_VERSION = "visual-coaching-1.0"
+PROMPT_VERSION = "visual-coaching-1.1"
 
 # Same provider/model selection as coaching_engine/llm/client.py's
 # LLMClient (§7.1: "same provider/model selection logic as existing
