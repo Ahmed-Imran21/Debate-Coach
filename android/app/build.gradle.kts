@@ -21,10 +21,9 @@ val localApiUrl = (findProperty("localApiUrl") as String?) ?: "http://192.168.1.
 val localWebsiteUrl = (findProperty("localWebsiteUrl") as String?) ?: localApiUrl.replace(":8000", ":3000")
 
 // Mirrors the website's NEXT_PUBLIC_VIDEO_ANALYSIS_ENABLED, which must
-// match the backend's VIDEO_ANALYSIS_ENABLED. The live backend has it
-// off, so the production build hides visual feedback until it's on
-// (then build with -PproductionVideoAnalysis=true).
-val productionVideoAnalysis = (findProperty("productionVideoAnalysis") as String?)?.toBoolean() ?: false
+// match the backend's VIDEO_ANALYSIS_ENABLED (on in production). Build
+// with -PproductionVideoAnalysis=false if the backend ever turns it off.
+val productionVideoAnalysis = (findProperty("productionVideoAnalysis") as String?)?.toBoolean() ?: true
 val localVideoAnalysis = (findProperty("localVideoAnalysis") as String?)?.toBoolean() ?: true
 
 android {

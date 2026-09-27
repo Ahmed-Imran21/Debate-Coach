@@ -33,9 +33,9 @@ SHA-256s (or copied from `web/public/mediapipe/models` if present).
 ### Visual feedback flag
 
 Like the website's `NEXT_PUBLIC_VIDEO_ANALYSIS_ENABLED`, which must match
-the backend's `VIDEO_ANALYSIS_ENABLED`: on in the local build, off in the
-production build because the live backend has it off. Build with
-`-PproductionVideoAnalysis=true` once it's on in production.
+the backend's `VIDEO_ANALYSIS_ENABLED`: on in both builds, as it is on
+the live backend. If the backend ever turns it off, build with
+`-PproductionVideoAnalysis=false` (or `-PlocalVideoAnalysis=false`).
 
 ## Install on a phone
 
