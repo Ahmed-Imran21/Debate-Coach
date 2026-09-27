@@ -13,3 +13,6 @@ app/src/main/assets/mediapipe/
 
 # The golden generator borrows the website's node_modules (a symlink)
 parity/node_modules
+
+# Built APKs handed over for installing
+dist/

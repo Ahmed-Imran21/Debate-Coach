@@ -27,6 +27,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.debatecoach.app.AppContainer
@@ -110,7 +112,7 @@ fun HomeScreen(container: AppContainer, onRecord: () -> Unit, onOpenSession: (St
                     text = { Text("Record") },
                     containerColor = c.pine,
                     contentColor = c.onPine,
-                    modifier = Modifier.testTag("record-button"),
+                    modifier = Modifier.testTag("record-button").semantics { contentDescription = "Record a speech" },
                 )
             }
         },

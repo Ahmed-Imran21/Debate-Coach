@@ -6,8 +6,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -47,7 +47,11 @@ private const val DURATION = 280
 
 @Composable
 fun AppNavigation(container: AppContainer, nav: NavHostController) {
-    val signedIn = container.backend.signedIn.collectAsStateWithLifecycle()
+    // Decided once, at launch. Later sign-outs are routed by the
+    // signedOut event below, which carries the reason to show; a start
+    // destination that followed the signed-in state would reset the
+    // graph and lose that message.
+    val start: Any = remember { if (container.backend.signedIn.value) HomeRoute else SignInRoute() }
     val context = LocalContext.current
 
     // An expired session, a deleted account or a sign-out, from any
@@ -65,7 +69,7 @@ fun AppNavigation(container: AppContainer, nav: NavHostController) {
 
     NavHost(
         navController = nav,
-        startDestination = if (signedIn.value) HomeRoute else SignInRoute(),
+        startDestination = start,
         enterTransition = { slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, tween(DURATION)) + fadeIn(tween(DURATION)) },
         exitTransition = { fadeOut(tween(DURATION / 2)) },
         popEnterTransition = { fadeIn(tween(DURATION)) },
