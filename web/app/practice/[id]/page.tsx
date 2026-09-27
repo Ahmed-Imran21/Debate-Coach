@@ -251,6 +251,7 @@ function Report({ report }: { report: SessionReport }): ReactElement {
     title: report.title,
     recordedAt: report.created_at,
     motion: report.motion ?? null,
+    motionNotApplied: report.motion_not_applied,
     scores: report.scores,
     feedback: report.feedback,
     delivery: {

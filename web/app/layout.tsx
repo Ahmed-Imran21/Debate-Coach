@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans, Newsreader } from "next/font/google";
 
+import BackendWarmup from "@/components/BackendWarmup";
 import Heartbeat from "@/components/Heartbeat";
 
 import "./globals.css";
@@ -63,6 +64,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${serif.variable} ${sans.variable}`}>
       <body>
+        <BackendWarmup />
         <Heartbeat />
         {children}
       </body>

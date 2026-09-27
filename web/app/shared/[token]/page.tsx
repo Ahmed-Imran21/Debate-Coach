@@ -64,6 +64,7 @@ function toView(report: SharedReport): ReportViewData {
     title: report.title,
     recordedAt: report.recorded_at,
     motion: report.motion,
+    motionNotApplied: report.motion_not_applied,
     scores: report.scores,
     feedback: report.feedback,
     delivery: {

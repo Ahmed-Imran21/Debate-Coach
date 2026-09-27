@@ -292,6 +292,8 @@ export interface SessionReport {
   status: SessionStatus;
   /** The practice motion, or null for "No prompt". */
   motion?: Motion | null;
+  /** A motion was set but coaching fell back and couldn't use it. */
+  motion_not_applied?: boolean;
   created_at: string;
   /** A category is null when it wasn't scored — rebuttal, for a speech with nothing to rebut. */
   scores: Partial<Record<Category | "overall", number | null>>;
@@ -653,6 +655,8 @@ export interface SharedReport extends VisualView {
   title: string | null;
   recorded_at: string;
   motion: { title: string; description: string } | null;
+  /** A motion was set but coaching fell back and couldn't use it. */
+  motion_not_applied?: boolean;
   scores: Partial<Record<Category | "overall", number | null>>;
   feedback: Array<Pick<FeedbackItem, "category" | "title" | "issue" | "severity" | "evidence" | "explanation" | "recommendation">>;
   delivery: {

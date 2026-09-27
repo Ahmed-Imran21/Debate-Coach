@@ -32,6 +32,37 @@ const REFRESH_KEY = "dc.refresh";
 // forever.
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+// Cloud Run scales the backend to zero when idle, and the first
+// request after that waits for a new instance: about 27s measured,
+// close to DEFAULT_TIMEOUT_MS. While the backend may be cold (no
+// response yet on this page, or none for COLD_AFTER_MS) a request
+// gets at least COLD_START_TIMEOUT_MS, and a GET that still times out
+// is retried once. POSTs aren't retried (a repeated signup or create
+// could double up), but get the longer timeout. warmUpBackend() starts
+// the instance on every page load, so usually nobody waits at all.
+const COLD_START_TIMEOUT_MS = 60_000;
+const COLD_AFTER_MS = 10 * 60_000;
+let lastResponseAt: number | null = null;
+
+function backendMayBeCold(): boolean {
+  return lastResponseAt === null || Date.now() - lastResponseAt > COLD_AFTER_MS;
+}
+
+/**
+ * Fire-and-forget GET /health, sent when a page loads, so a cold
+ * backend is starting while the user reads. no-cors: the response
+ * isn't needed, only that the request reaches the server. Never
+ * throws.
+ */
+export function warmUpBackend(): void {
+  if (typeof fetch !== "function") return;
+  fetch(`${BASE}/health`, { mode: "no-cors", cache: "no-store" })
+    .then(() => {
+      lastResponseAt = Date.now();
+    })
+    .catch(() => {});
+}
+
 // The audio blob PUT specifically (uploadAndStart, and Recorder.tsx's
 // video-analysis path via putToSignedUrl below) goes straight to a
 // GCS signed URL, never through request(). A real debate-practice
@@ -336,25 +367,36 @@ export async function request<T>(
 
   let response: Response;
 
-  try {
-    response = await fetch(`${BASE}${path}`, {
-      method,
-      headers,
-      body: rawBody !== undefined ? rawBody : body === undefined ? undefined : JSON.stringify(body),
-      signal: timeoutSignal(timeoutMs),
-    });
-  } catch (caught) {
-    // Previously fetch()'s own rejection (a stalled connection
-    // with no timeout at all, or a real network failure) just
-    // propagated as-is — every caller's `instanceof ApiError`
-    // check already treats a non-ApiError as "the request never
-    // reached the server," so this only adds a message specific
-    // enough to tell someone their connection stalled rather than
-    // something being wrong with the request itself.
-    if (isTimeout(caught)) {
-      throw new ApiError(408, "The request timed out. Check your connection and try again.");
+  const cold = backendMayBeCold();
+  const idempotent = method === "GET" || method === "HEAD";
+  let attemptsLeft = cold && idempotent ? 2 : 1;
+
+  for (;;) {
+    try {
+      response = await fetch(`${BASE}${path}`, {
+        method,
+        headers,
+        body: rawBody !== undefined ? rawBody : body === undefined ? undefined : JSON.stringify(body),
+        signal: timeoutSignal(cold ? Math.max(timeoutMs, COLD_START_TIMEOUT_MS) : timeoutMs),
+      });
+      lastResponseAt = Date.now();
+      break;
+    } catch (caught) {
+      attemptsLeft -= 1;
+      // A cold backend that still hasn't answered: try the GET once more.
+      if (isTimeout(caught) && attemptsLeft > 0) continue;
+      // Previously fetch()'s own rejection (a stalled connection
+      // with no timeout at all, or a real network failure) just
+      // propagated as-is — every caller's `instanceof ApiError`
+      // check already treats a non-ApiError as "the request never
+      // reached the server," so this only adds a message specific
+      // enough to tell someone their connection stalled rather than
+      // something being wrong with the request itself.
+      if (isTimeout(caught)) {
+        throw new ApiError(408, "The request timed out. Check your connection and try again.");
+      }
+      throw caught;
     }
-    throw caught;
   }
 
   // An expired access token is the common case, not an error.
