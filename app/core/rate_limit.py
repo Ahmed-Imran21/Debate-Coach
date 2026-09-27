@@ -39,10 +39,16 @@ class PerClientRateLimitMiddleware(BaseHTTPMiddleware):
         app,
         max_requests_per_minute: int = 60,
         trust_forwarded_for: bool = False,
+        path_limits: Dict[str, int] | None = None,
     ):
         super().__init__(app)
 
         self._max = max_requests_per_minute
+
+        # Stricter budgets for some path prefixes, on top of the
+        # global one: {"/v1/shared/": 20} gives each client its own
+        # 20-per-minute bucket for share-link lookups.
+        self._path_limits = dict(path_limits or {})
         self._trust_forwarded_for = trust_forwarded_for
 
         self._hits: Dict[str, Deque[float]] = defaultdict(deque)
@@ -117,33 +123,41 @@ class PerClientRateLimitMiddleware(BaseHTTPMiddleware):
         self._sweep(now)
 
         client_key = self._client_key(request)
-        hits = self._hits[client_key]
 
-        while hits and hits[0] < window_start:
-            hits.popleft()
+        buckets = [(client_key, self._max)]
+        for prefix, limit in self._path_limits.items():
+            if request.url.path.startswith(prefix):
+                buckets.append((f"{prefix}|{client_key}", limit))
 
-        if len(hits) >= self._max:
+        for key, limit in buckets:
+            hits = self._hits[key]
+            while hits and hits[0] < window_start:
+                hits.popleft()
+            if len(hits) >= limit:
+                return self._too_many(request, client_key, now, hits)
 
-            retry_after = max(1, int(60 - (now - hits[0])))
-
-            logger.warning(
-                "Rate limit exceeded for client %s on %s %s",
-                client_key,
-                request.method,
-                request.url.path,
-            )
-
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "detail": (
-                        "Too many requests. Try again in "
-                        f"{retry_after} seconds."
-                    )
-                },
-                headers={"Retry-After": str(retry_after)},
-            )
-
-        hits.append(now)
+        for key, _ in buckets:
+            self._hits[key].append(now)
 
         return await call_next(request)
+
+    def _too_many(self, request: Request, client_key: str, now: float, hits: Deque[float]) -> JSONResponse:
+        retry_after = max(1, int(60 - (now - hits[0])))
+
+        logger.warning(
+            "Rate limit exceeded for client %s on %s %s",
+            client_key,
+            request.method,
+            request.url.path,
+        )
+
+        return JSONResponse(
+            status_code=429,
+            content={
+                "detail": (
+                    "Too many requests. Try again in "
+                    f"{retry_after} seconds."
+                )
+            },
+            headers={"Retry-After": str(retry_after)},
+        )

@@ -5,14 +5,11 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 
-import KeyMomentsList from "@/components/KeyMomentsList";
+import ReportView, { type ReportViewData } from "@/components/ReportView";
+import ShareSection from "@/components/ShareSection";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
-import SpeechTrack, {
-  formatClock,
-  type Mark,
-} from "@/components/SpeechTrack";
-import VisualDeliverySection from "@/components/VisualDeliverySection";
+import SpeechTrack, { type Mark } from "@/components/SpeechTrack";
 import {
   ApiError,
   getAccessToken,
@@ -21,34 +18,12 @@ import {
   redirectToLoginAfterSessionExpiry,
 } from "@/lib/api";
 import {
-  CATEGORY_LABEL,
   STATUS_LABEL,
-  type Category,
-  type FeedbackItem,
   type SessionReport,
   type SessionSummary,
-  type Severity,
 } from "@/lib/types";
 
 const POLL_MS = 4000;
-
-const SEVERITY_ORDER: Severity[] = ["high", "medium", "low", "positive"];
-
-const SEVERITY_LABEL: Record<Severity, string> = {
-  high: "Needs work",
-  medium: "Worth fixing",
-  low: "Minor",
-  positive: "Working well",
-};
-
-const SCORE_ORDER: Category[] = [
-  "quantitative",
-  "argumentation",
-  "rebuttal",
-  "structure",
-  "persuasion",
-  "logic",
-];
 
 export default function SessionPage(): ReactElement {
   const params = useParams<{ id: string }>();
@@ -129,7 +104,7 @@ export default function SessionPage(): ReactElement {
       <main>
         <section className="block-tight" style={{ paddingTop: "2.5rem" }}>
           <div className="wrap">
-            <p className="note" style={{ marginBottom: "0.75rem" }}>
+            <p className="note" data-print="hide" style={{ marginBottom: "0.75rem" }}>
               <Link href="/practice">Back to sessions</Link>
             </p>
 
@@ -221,7 +196,6 @@ function Working({
 /* ---------------------------------------------------------- */
 
 function Report({ report }: { report: SessionReport }): ReactElement {
-  const [filter, setFilter] = useState<Category | "all">("all");
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const seekAudio = useCallback((seconds: number) => {
@@ -273,77 +247,29 @@ function Report({ report }: { report: SessionReport }): ReactElement {
     return collected;
   }, [report, fillers, stutters]);
 
-  const grouped = useMemo(() => {
-    const items =
-      filter === "all"
-        ? report.feedback
-        : report.feedback.filter((item) => item.category === filter);
+  const data: ReportViewData = {
+    title: report.title,
+    recordedAt: report.created_at,
+    motion: report.motion ?? null,
+    scores: report.scores,
+    feedback: report.feedback,
+    delivery: {
+      wordsPerMinute: speech?.words_per_minute ?? null,
+      speechDuration: speech?.speech_duration ?? null,
+      fillers: fillers?.count ?? null,
+      pauses: pauses?.count ?? null,
+      stutters: stutters?.count ?? null,
+    },
+    visual: report,
+  };
 
-    return [...items].sort(
-      (a, b) =>
-        SEVERITY_ORDER.indexOf(a.severity) -
-        SEVERITY_ORDER.indexOf(b.severity),
-    );
-  }, [report.feedback, filter]);
-
-  const recorded = new Date(report.created_at).toLocaleDateString(
-    undefined,
-    { day: "numeric", month: "long", year: "numeric" },
-  );
-
-  const present = useMemo(
-    () =>
-      SCORE_ORDER.filter((category) =>
-        report.feedback.some((item) => item.category === category),
-      ),
-    [report.feedback],
-  );
-
-  return (
+  // The timeline and audio player are the owner's only: they're built
+  // from the transcript and the recording, neither of which a shared
+  // link exposes. Both are left out of the printed report.
+  const ownerExtras = (
     <>
-      <h1 style={{ fontSize: "var(--step-4)" }}>
-        {report.title || `Session of ${recorded}`}
-      </h1>
-
-      <p className="note" style={{ margin: "0.5rem 0 2rem" }}>
-        Recorded {recorded}
-        {report.motion && (
-          <>
-            <br />
-            Motion: {report.motion.description}
-          </>
-        )}
-      </p>
-
-      <div className="figures" style={{ marginBottom: "2rem" }}>
-        <div className="figure">
-          <b>{Math.round(report.scores.overall ?? 0)}</b>
-          <span>Overall, out of 100</span>
-        </div>
-        <div className="figure">
-          <b>{Math.round(speech?.words_per_minute ?? 0)}</b>
-          <span>Words per minute</span>
-        </div>
-        <div className="figure">
-          <b>{formatClock(speech?.speech_duration ?? 0)}</b>
-          <span>Time actually speaking</span>
-        </div>
-        <div className="figure">
-          <b>{fillers?.count ?? 0}</b>
-          <span>Filler words</span>
-        </div>
-        <div className="figure">
-          <b>{pauses?.count ?? 0}</b>
-          <span>Pauses</span>
-        </div>
-        <div className="figure">
-          <b>{stutters?.count ?? 0}</b>
-          <span>Stutters</span>
-        </div>
-      </div>
-
       {duration > 0 && (
-        <div style={{ marginBottom: "2.5rem" }}>
+        <div data-print="hide" style={{ marginBottom: "2.5rem" }}>
           <SpeechTrack
             duration={duration}
             marks={marks}
@@ -353,7 +279,7 @@ function Report({ report }: { report: SessionReport }): ReactElement {
       )}
 
       {report.audio_url && (
-        <div style={{ marginBottom: "2.5rem" }}>
+        <div data-print="hide" style={{ marginBottom: "2.5rem" }}>
           <h2 style={{ fontSize: "var(--step-2)", marginBottom: "0.75rem" }}>
             Listen back
           </h2>
@@ -365,120 +291,15 @@ function Report({ report }: { report: SessionReport }): ReactElement {
           />
         </div>
       )}
-
-      <VisualDeliverySection report={report} />
-      <KeyMomentsList
-        report={report}
-        onSeek={report.audio_url ? seekAudio : undefined}
-      />
-
-      <h2 style={{ fontSize: "var(--step-2)", marginBottom: "1rem" }}>
-        Scores by category
-      </h2>
-
-      <div className="bars" style={{ marginBottom: "2.5rem" }}>
-        {SCORE_ORDER.map((category) => {
-          const raw = report.scores[category];
-          // null: not scored (rebuttal for a speech with nothing to
-          // rebut), left out of the overall. Absent: an older report.
-          const notScored = raw === null;
-          const value = raw ?? 0;
-
-          return (
-            <div className="bar-row" key={category}>
-              <span className="bar-label">
-                {CATEGORY_LABEL[category]}
-              </span>
-              {notScored ? (
-                // Spans the track and value columns: the value column
-                // is sized for a number, not a phrase.
-                <span className="note" style={{ gridColumn: "2 / 4", margin: 0 }}>
-                  Not scored: nothing to rebut
-                </span>
-              ) : (
-                <>
-                  <div className="bar-track">
-                    <div
-                      className="bar-fill"
-                      style={{ width: `${Math.min(100, value)}%` }}
-                    />
-                  </div>
-                  <span className="bar-value">{Math.round(value)}</span>
-                </>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      <p className="note" style={{ maxWidth: "58ch" }}>
-        Delivery is arithmetic over the audio. The other five come from a
-        language model reading your transcript, so treat them as a second
-        opinion rather than a mark. Rebuttal isn&apos;t scored when there was
-        nothing to rebut, and doesn&apos;t count toward the overall.
-      </p>
-
-      <h2 style={{ fontSize: "var(--step-2)", margin: "2.5rem 0 1rem" }}>
-        Findings
-      </h2>
-
-      <div className="filters">
-        <button
-          className="filter"
-          type="button"
-          aria-pressed={filter === "all"}
-          onClick={() => setFilter("all")}
-        >
-          All {report.feedback.length}
-        </button>
-
-        {present.map((category) => (
-          <button
-            key={category}
-            className="filter"
-            type="button"
-            aria-pressed={filter === category}
-            onClick={() => setFilter(category)}
-          >
-            {CATEGORY_LABEL[category]}
-          </button>
-        ))}
-      </div>
-
-      <ul className="findings">
-        {grouped.map((item, index) => (
-          <Finding key={`${item.category}-${index}`} item={item} />
-        ))}
-      </ul>
     </>
   );
-}
 
-/* ---------------------------------------------------------- */
-
-function Finding({ item }: { item: FeedbackItem }): ReactElement {
   return (
-    <li className="finding" data-severity={item.severity}>
-      <div>
-        <h3>{item.title}</h3>
-
-        <p className="finding-meta">
-          {CATEGORY_LABEL[item.category] ?? item.category}.{" "}
-          {SEVERITY_LABEL[item.severity] ?? item.severity}.
-        </p>
-
-        <p>{item.issue}</p>
-
-        {item.evidence.map((quote, index) => (
-          <blockquote key={index}>{quote}</blockquote>
-        ))}
-
-        {item.explanation && <p>{item.explanation}</p>}
-
-        {item.recommendation && (
-          <p className="rec">{item.recommendation}</p>
-        )}
-      </div>
-    </li>
+    <ReportView
+      data={data}
+      belowTitle={<ShareSection sessionId={report.id} />}
+      afterFigures={ownerExtras}
+      onSeek={report.audio_url ? seekAudio : undefined}
+    />
   );
 }

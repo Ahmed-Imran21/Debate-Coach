@@ -7,7 +7,7 @@ import {
   VISUAL_METRIC_INFO,
   VISUAL_METRIC_ORDER,
   VISUAL_WARNING_LABEL,
-  type SessionReport,
+  type VisualView,
   type VisualMetric,
   type VisualMetricFormat,
 } from "@/lib/types";
@@ -64,7 +64,7 @@ function unavailableMessage(group: "face" | "hands", status: VisualMetric["statu
 export default function VisualDeliverySection({
   report,
 }: {
-  report: SessionReport;
+  report: VisualView;
 }): ReactElement | null {
   const status = report.video_analysis_status;
 

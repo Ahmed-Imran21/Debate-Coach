@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { ADMIN_LINK, GATE_COOKIE, isAdminToken } from "./lib/admin-gate";
+import { SHARED_PAGE_HEADERS } from "./lib/shared-headers.mjs";
 
 /**
  * Server-side gate for /admin. The backend's require_admin is the
@@ -30,7 +31,21 @@ function isAdminPath(pathname: string): boolean {
   return pathname === base || pathname.startsWith(`${base}/`) || pathname.startsWith(`${base}.`);
 }
 
+function isSharedPath(pathname: string): boolean {
+  return pathname === "/shared" || pathname.startsWith("/shared/");
+}
+
 export async function middleware(request: NextRequest): Promise<NextResponse> {
+  // Public shared reports: explicitly allowed with no sign-in (the
+  // backend decides what a token can see), with their no-index,
+  // no-store, no-referrer headers. This touches nothing else: every
+  // other path is handled exactly as before.
+  if (isSharedPath(request.nextUrl.pathname)) {
+    const response = NextResponse.next();
+    for (const { key, value } of SHARED_PAGE_HEADERS) response.headers.set(key, value);
+    return response;
+  }
+
   if (!isAdminPath(request.nextUrl.pathname)) {
     return NextResponse.next();
   }

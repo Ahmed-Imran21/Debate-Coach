@@ -134,6 +134,9 @@ class SessionOut(BaseModel):
     # The practice motion, or null for "No prompt".
     motion: MotionOut | None = None
 
+    # True while the session has an active share link.
+    shared: bool = False
+
     # Video track. Always present; "not_requested" when the
     # session never asked for it or the feature is off.
     video_analysis_status: str = "not_requested"

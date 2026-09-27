@@ -9,6 +9,9 @@ import type {
   ReportSessionCount,
   SessionCreated,
   SessionReport,
+  ShareCreated,
+  SharedReport,
+  ShareStatus,
   SessionSummary,
   Tokens,
   User,
@@ -490,6 +493,35 @@ export function createProgressReport(sessionCount: ReportSessionCount): Promise<
 
 export function getLatestProgressReport(): Promise<LatestProgressReport> {
   return request<LatestProgressReport>("/v1/progress-reports/latest");
+}
+
+/* ---------------------------------------------------------- */
+/* Share links                                                 */
+/* ---------------------------------------------------------- */
+
+export function getShareStatus(sessionId: string): Promise<ShareStatus> {
+  return request<ShareStatus>(`/v1/sessions/${encodeURIComponent(sessionId)}/share`);
+}
+
+/** Creates a link, or replaces the current one (the old link stops working). */
+export function createShareLink(sessionId: string): Promise<ShareCreated> {
+  return request<ShareCreated>(`/v1/sessions/${encodeURIComponent(sessionId)}/share`, { method: "POST" });
+}
+
+export function stopSharing(sessionId: string): Promise<void> {
+  return request<void>(`/v1/sessions/${encodeURIComponent(sessionId)}/share`, { method: "DELETE" });
+}
+
+/**
+ * The public report behind a share link. Sent with no credentials at
+ * all, even if the viewer happens to be signed in, so it's exactly
+ * what anyone with the link sees.
+ */
+export function getSharedReport(token: string): Promise<SharedReport> {
+  return request<SharedReport>(`/v1/shared/${encodeURIComponent(token)}`, {
+    auth: false,
+    retryOnAuthFailure: false,
+  });
 }
 
 export function getMotions(): Promise<Motion[]> {

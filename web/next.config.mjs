@@ -1,3 +1,5 @@
+import { SHARED_PAGE_HEADERS } from "./lib/shared-headers.mjs";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -76,6 +78,14 @@ const nextConfig = {
             value: "max-age=63072000; includeSubDomains; preload",
           },
         ],
+      },
+      {
+        // Public shared reports: never indexed, never cached by a
+        // shared cache, and the link (the credential) never sent on
+        // as a Referer. Listed after the rule above so its
+        // Referrer-Policy wins. middleware.ts sets the same headers.
+        source: "/shared/:path*",
+        headers: SHARED_PAGE_HEADERS,
       },
     ];
   },
