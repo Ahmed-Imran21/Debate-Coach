@@ -388,15 +388,19 @@ class VisualSession {
     }
 
     /** A pause in frames that aren't the scheduler's doing (web: tab hidden; here the camera stalling). */
-    fun openGap(nowMs: Double, reason: String) = synchronized(lock) {
-        val t0 = t0Ms ?: return
-        if (mode != CaptureMode.RECORDING || track.hasOpenGap) return
-        track.openGapAt(maxOf(0.0, (nowMs - t0) / 1000 + CLOCK_OFFSET_S), reason)
+    fun openGap(nowMs: Double, reason: String) {
+        synchronized(lock) {
+            val t0 = t0Ms ?: return
+            if (mode != CaptureMode.RECORDING || track.hasOpenGap) return
+            track.openGapAt(maxOf(0.0, (nowMs - t0) / 1000 + CLOCK_OFFSET_S), reason)
+        }
     }
 
-    fun closeGap(nowMs: Double) = synchronized(lock) {
-        val t0 = t0Ms ?: return
-        track.closeGapAt(maxOf(0.0, (nowMs - t0) / 1000 + CLOCK_OFFSET_S))
+    fun closeGap(nowMs: Double) {
+        synchronized(lock) {
+            val t0 = t0Ms ?: return
+            track.closeGapAt(maxOf(0.0, (nowMs - t0) / 1000 + CLOCK_OFFSET_S))
+        }
     }
 
     fun endRecording(

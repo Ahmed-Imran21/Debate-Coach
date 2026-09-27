@@ -105,6 +105,10 @@ class ApiClient(
                 throw ApiException(408, TIMEOUT_MESSAGE)
             } catch (io: IOException) {
                 throw NetworkException(io)
+            } catch (bad: kotlinx.serialization.SerializationException) {
+                // A success status with a body this build can't read.
+                coldStart.markResponse()
+                throw ApiException(0, GENERIC_ERROR_MESSAGE)
             }
         }
 
@@ -135,11 +139,15 @@ class ApiClient(
         if (current != null && current != failedWith) return@withLock true
 
         val refresh = tokens.refreshToken ?: return@withLock endSession()
+        // A refresh that can't reach the server, times out, or answers
+        // with something unreadable is treated like a rejected one.
         val response = try {
             withTimeout(DEFAULT_TIMEOUT_MS) { service.refresh(RefreshRequest(refresh)) }
         } catch (_: TimeoutCancellationException) {
             return@withLock endSession()
-        } catch (_: IOException) {
+        } catch (cancel: kotlinx.coroutines.CancellationException) {
+            throw cancel
+        } catch (_: Exception) {
             return@withLock endSession()
         }
         coldStart.markResponse()

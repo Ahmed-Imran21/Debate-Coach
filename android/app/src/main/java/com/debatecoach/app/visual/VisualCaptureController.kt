@@ -8,7 +8,6 @@ import android.hardware.camera2.CameraCharacteristics
 import android.os.SystemClock
 import android.util.Size
 import androidx.camera.camera2.interop.Camera2CameraInfo
-import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -152,7 +151,6 @@ class VisualCaptureController(private val context: Context, private val scope: C
      * which is converted so frames and the recorder's start share one.
      */
     @SuppressLint("UnsafeOptInUsageError")
-    @OptIn(ExperimentalCamera2Interop::class)
     private fun timestampOffset(info: androidx.camera.core.CameraInfo): Long = try {
         val sourceType = Camera2CameraInfo.from(info).getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE)
         if (sourceType == CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME) 0L
