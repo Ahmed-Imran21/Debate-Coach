@@ -463,7 +463,7 @@ def get_progress(
 
     column = getattr(DebateSession, PROGRESS_COLUMNS[metric])
 
-    query = select(DebateSession.id, DebateSession.created_at, column).where(
+    query = select(DebateSession.id, DebateSession.created_at, DebateSession.title, column).where(
         DebateSession.user_id == current_user.id,
         DebateSession.status == SessionStatus.completed,
     )
@@ -481,7 +481,9 @@ def get_progress(
         ).all()
         rows = list(reversed(newest))
 
-    return [ProgressPoint(session_id=row[0], created_at=row[1], score=row[2]) for row in rows]
+    return [
+        ProgressPoint(session_id=row[0], created_at=row[1], title=row[2], score=row[3]) for row in rows
+    ]
 
 
 @router.get("/{session_id}", response_model=SessionOut)

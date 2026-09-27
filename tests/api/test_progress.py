@@ -164,7 +164,7 @@ def test_each_metric_returns_its_own_score(token_client, add_session, make_user,
 
     assert point["score"] == distinct[column]
     assert point["session_id"] == str(row.id)
-    assert set(point) == {"session_id", "created_at", "score"}
+    assert set(point) == {"session_id", "created_at", "title", "score"}
 
 
 def test_rebuttal_not_scored_comes_back_null(token_client, add_session, make_user):
@@ -234,3 +234,14 @@ def test_pipeline_records_category_scores(db, make_user):
         20.0,
     )
     assert row.overall_score == 56.0
+
+
+def test_each_point_carries_the_session_title_for_the_tooltip(token_client, add_session, make_user, db):
+    alice = make_user("a@test")
+    named = add_session(alice, 2)
+    named.title = "Second constructive, nuclear energy"
+    db.commit()
+    add_session(alice, 1)  # untitled
+
+    titles = [p["title"] for p in token_client(alice, metric="overall", range="5").json()]
+    assert titles == ["Second constructive, nuclear energy", None]

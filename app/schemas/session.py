@@ -211,6 +211,9 @@ ProgressRange = Literal["1d", "1w", "1m", "5", "10", "15"]
 class ProgressPoint(BaseModel):
     session_id: uuid.UUID
     created_at: datetime
+    # For the chart's tooltip. None when the session has no title (the
+    # client then shows "Session of <date>", as the session list does).
+    title: str | None
     # None when the session has no score for this metric (rebuttal
     # with nothing to rebut); the chart skips those points.
     score: float | None

@@ -531,6 +531,8 @@ export type ProgressRange = "1d" | "1w" | "1m" | "5" | "10" | "15";
 export interface ProgressPoint {
   session_id: string;
   created_at: string;
+  /** For the tooltip; null when untitled. Optional: older backends omit it. */
+  title?: string | null;
   /** null when the session has no score for this metric (rebuttal with nothing to rebut). */
   score: number | null;
 }
