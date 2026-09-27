@@ -1,17 +1,30 @@
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from app.core.config import settings
 
 
-pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto",
-)
+# Passwords are hashed with bcrypt directly. This replaced passlib's
+# CryptContext(schemes=["bcrypt"]), which logged a traceback on every
+# cold start (passlib 1.7.4 reads bcrypt.__about__, removed in bcrypt
+# 4.1). The behaviour is identical, so every existing hash still
+# verifies (tests/fixtures/passlib_hashes.json holds real hashes from
+# the passlib code):
+# - the same "$2b$" hashes at cost 12;
+# - the same 72-byte truncation (_prepare, below, unchanged);
+# - the same ValueError for a password containing a NUL character or
+#   for a stored hash that isn't a bcrypt hash.
+BCRYPT_ROUNDS = 12
 
+# A well-formed bcrypt hash. Checked before bcrypt.checkpw: for a
+# value that looks like a bcrypt hash but is cut short, its Rust core
+# panics (pyo3 PanicException, not even an Exception) rather than
+# raising ValueError as passlib did.
+_BCRYPT_HASH = re.compile(r"\$2[abxy]\$\d{2}\$[./A-Za-z0-9]{53}")
 
 # bcrypt only reads the first 72 bytes of a password and newer
 # backends raise rather than truncate silently. Truncating here
@@ -33,17 +46,35 @@ def _prepare(password: str) -> str:
     )
 
 
+def _secret(password: str) -> bytes:
+    secret = _prepare(password).encode("utf-8")
+
+    # passlib refused these; bare bcrypt would accept them.
+    if b"\x00" in secret:
+        raise ValueError("bcrypt does not allow NUL characters in a password.")
+
+    return secret
+
+
 def hash_password(password: str) -> str:
-    return pwd_context.hash(_prepare(password))
+    return bcrypt.hashpw(
+        _secret(password),
+        bcrypt.gensalt(rounds=BCRYPT_ROUNDS, prefix=b"2b"),
+    ).decode("ascii")
 
 
 def verify_password(
     plain_password: str,
     hashed_password: str,
 ) -> bool:
-    return pwd_context.verify(
-        _prepare(plain_password),
-        hashed_password,
+    # A stored value that isn't a bcrypt hash raises ValueError, as
+    # passlib did (its UnknownHashError is a ValueError).
+    if not isinstance(hashed_password, str) or not _BCRYPT_HASH.fullmatch(hashed_password):
+        raise ValueError("The stored password hash is not a bcrypt hash.")
+
+    return bcrypt.checkpw(
+        _secret(plain_password),
+        hashed_password.encode("utf-8"),
     )
 
 
