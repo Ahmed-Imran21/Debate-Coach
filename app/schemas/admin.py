@@ -35,10 +35,40 @@ class StorageUsageOut(BaseModel):
     remaining_gb: float
 
 
+class WhisperKeyUsageOut(BaseModel):
+    """
+    One Whisper (transcription) key, in its own units: requests and
+    seconds of audio, never tokens. Rolling windows, as Groq enforces
+    them. Requests count every attempt; audio counts successful
+    transcriptions only. The key id only, never the key.
+    """
+
+    key_id: str
+    label: str
+
+    requests_last_minute: int
+    requests_last_hour: int
+    requests_last_24h: int
+    requests_per_minute_limit: int
+    requests_per_day_limit: int
+
+    audio_seconds_last_hour: float
+    audio_seconds_last_24h: float
+    audio_seconds_per_hour_limit: int
+    audio_seconds_per_day_limit: int
+
+    failed_last_24h: int
+    rate_limited_last_24h: int
+    last_used_at: datetime | None
+
+
 class AdminStatsOut(BaseModel):
     active_users: int
     total_signups: int
     keys: list[KeyUsageOut]
+    # Transcription keys, separate from the LLM keys above (which are
+    # unchanged).
+    whisper_keys: list[WhisperKeyUsageOut] = []
     storage: StorageUsageOut
 
 

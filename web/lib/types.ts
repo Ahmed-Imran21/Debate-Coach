@@ -485,10 +485,35 @@ export interface StorageUsage {
   remaining_gb: number;
 }
 
+/**
+ * One Whisper (transcription) key, in its own units: requests and
+ * seconds of audio, never tokens. Rolling windows, as Groq enforces
+ * them. Requests count every attempt; audio counts successful
+ * transcriptions only.
+ */
+export interface WhisperKeyUsage {
+  key_id: string;
+  label: string;
+  requests_last_minute: number;
+  requests_last_hour: number;
+  requests_last_24h: number;
+  requests_per_minute_limit: number;
+  requests_per_day_limit: number;
+  audio_seconds_last_hour: number;
+  audio_seconds_last_24h: number;
+  audio_seconds_per_hour_limit: number;
+  audio_seconds_per_day_limit: number;
+  failed_last_24h: number;
+  rate_limited_last_24h: number;
+  last_used_at: string | null;
+}
+
 export interface AdminStats {
   active_users: number;
   total_signups: number;
   keys: KeyUsage[];
+  /** Optional: older backends don't send it. */
+  whisper_keys?: WhisperKeyUsage[];
   storage: StorageUsage;
 }
 

@@ -53,7 +53,11 @@ class APIClient:
     Both are process-wide and shared by all sessions.
     """
 
-    def __init__(self, on_usage: Optional[UsageHook] = None):
+    def __init__(
+        self,
+        on_usage: Optional[UsageHook] = None,
+        on_whisper_usage: Optional[Callable[..., None]] = None,
+    ):
         """
         on_usage: optional hook invoked right alongside the
         existing usage_tracker.record_*() calls in
@@ -67,6 +71,9 @@ class APIClient:
         exists at all. Defaults to a no-op so every other caller
         (tests, anything constructing APIClient directly) is
         unaffected.
+
+        on_whisper_usage: the same idea for transcription, handed
+        to WhisperClient (see its on_usage).
         """
 
         self._on_usage: UsageHook = on_usage or (lambda *a, **k: None)
@@ -115,7 +122,7 @@ class APIClient:
         # key pool and Whisper queue.
         # =====================================================
 
-        self.whisper_client = WhisperClient()
+        self.whisper_client = WhisperClient(on_usage=on_whisper_usage)
 
     # =========================================================
     # SHUTDOWN

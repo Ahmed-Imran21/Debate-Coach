@@ -4,6 +4,7 @@ from app.models.session import DebateSession, SessionStatus
 from app.models.session_share import SessionShare
 from app.models.user import User
 from app.models.video_analysis import SessionMetric, VideoAnalysis
+from app.models.whisper_usage import WhisperUsageEvent
 
 __all__ = [
     "DebateSession",
@@ -14,4 +15,5 @@ __all__ = [
     "KeyUsage",
     "ProgressReport",
     "SessionShare",
+    "WhisperUsageEvent",
 ]

@@ -21,6 +21,7 @@ from typing import Optional
 from api.client import APIClient
 
 from app.services.key_usage import record_usage
+from app.services.whisper_usage import record_whisper_usage
 
 
 _api_client: Optional[APIClient] = None
@@ -40,7 +41,9 @@ def start() -> APIClient:
     # on_usage=record_usage is the only place api/'s key-dispatch
     # path and app/'s storage layer connect — see
     # app/services/key_usage.py and api/client.py's UsageHook.
-    _api_client = APIClient(on_usage=record_usage)
+    # on_whisper_usage does the same for transcription
+    # (app/services/whisper_usage.py, api/whisper.py's on_usage).
+    _api_client = APIClient(on_usage=record_usage, on_whisper_usage=record_whisper_usage)
 
     return _api_client
 
