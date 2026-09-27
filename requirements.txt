@@ -37,6 +37,12 @@ cloud-sql-python-connector[pg8000]~=1.21.0
 python-jose[cryptography]~=3.3.0
 bcrypt~=4.2.0
 
+# --- Time zones ---
+# IANA zone data for zoneinfo (profile streaks and weeks follow the
+# user's own time zone). python:3.12-slim may ship without a system
+# tz database; zoneinfo falls back to this package.
+tzdata~=2026.4
+
 # --- Object storage ---
 google-cloud-storage~=3.14.0
 

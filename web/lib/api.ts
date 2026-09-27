@@ -2,6 +2,8 @@ import { tokenExpiresAt } from "./jwt";
 import type {
   LatestProgressReport,
   Motion,
+  Profile,
+  ProfileChanges,
   ProgressMetric,
   ProgressPoint,
   ProgressRange,
@@ -535,6 +537,20 @@ export function createProgressReport(sessionCount: ReportSessionCount): Promise<
 
 export function getLatestProgressReport(): Promise<LatestProgressReport> {
   return request<LatestProgressReport>("/v1/progress-reports/latest");
+}
+
+/* ---------------------------------------------------------- */
+/* Profile                                                     */
+/* ---------------------------------------------------------- */
+
+/** The signed-in user's own profile, streak, weekly goal and personal bests. */
+export function getProfile(): Promise<Profile> {
+  return request<Profile>("/v1/profile");
+}
+
+/** Changes only the fields sent; returns the whole updated profile. */
+export function updateProfile(changes: ProfileChanges): Promise<Profile> {
+  return request<Profile>("/v1/profile", { method: "PUT", body: changes });
 }
 
 /* ---------------------------------------------------------- */

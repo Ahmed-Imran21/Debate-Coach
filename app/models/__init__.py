@@ -1,4 +1,5 @@
 from app.models.key_usage import KeyUsage
+from app.models.profile import SessionDeliveryScore, UserProfile
 from app.models.progress_report import ProgressReport
 from app.models.session import DebateSession, SessionStatus
 from app.models.session_share import SessionShare
@@ -16,4 +17,6 @@ __all__ = [
     "ProgressReport",
     "SessionShare",
     "WhisperUsageEvent",
+    "UserProfile",
+    "SessionDeliveryScore",
 ]

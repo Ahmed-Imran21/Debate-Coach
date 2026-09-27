@@ -667,3 +667,50 @@ export interface SharedReport extends VisualView {
     stutter_count: number | null;
   };
 }
+
+/* ------------------------------------------------------------
+   Profile (GET/PUT /v1/profile): the signed-in user's own only
+   ------------------------------------------------------------ */
+
+export type BestCategory = "overall" | Category;
+
+export interface PersonalBest {
+  category: BestCategory;
+  /** All null when the category has no score yet. */
+  score: number | null;
+  session_id: string | null;
+  title: string | null;
+  created_at: string | null;
+}
+
+export interface Profile {
+  first_name: string;
+  last_name: string;
+  username: string | null;
+  bio: string | null;
+  weekly_goal: number;
+  time_zone: string | null;
+  completed_sessions: number;
+  streak: {
+    current: number;
+    longest: number;
+    /** False with current > 0: practised yesterday, not yet today. */
+    practised_today: boolean;
+  };
+  week: {
+    completed: number;
+    goal: number;
+    goal_met: boolean;
+    starts_on: string;
+    ends_on: string;
+  };
+  personal_bests: PersonalBest[];
+}
+
+/** Only the fields sent change; a blank or null username or bio clears it. */
+export interface ProfileChanges {
+  username?: string | null;
+  bio?: string | null;
+  weekly_goal?: number;
+  time_zone?: string;
+}
