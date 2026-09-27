@@ -1,0 +1,15 @@
+# Gradle / Android Studio
+.gradle/
+build/
+*/build/
+local.properties
+.idea/
+*.iml
+captures/
+.kotlin/
+
+# Downloaded at build time (app/build.gradle.kts, verified by SHA-256)
+app/src/main/assets/mediapipe/
+
+# The golden generator borrows the website's node_modules (a symlink)
+parity/node_modules

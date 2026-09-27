@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- web/app/globals.css tokens (light). -->
+    <color name="paper">#EDEFEA</color>
+    <color name="pine">#2E5E4E</color>
+    <color name="rule_strong">#A8B0A3</color>
+    <color name="window_background">#EDEFEA</color>
+    <color name="launcher_background">#EDEFEA</color>
+</resources>
