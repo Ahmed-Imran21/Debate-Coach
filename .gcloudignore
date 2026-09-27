@@ -29,3 +29,7 @@ sessions/
 sessions copy/
 .pytest_cache/
 .vscode/
+
+# The native Android app: not part of the backend image, and its
+# local build output is hundreds of MB.
+android/
