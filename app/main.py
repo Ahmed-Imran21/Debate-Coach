@@ -14,7 +14,7 @@ from app.core.config import settings
 from app.core.last_seen import LastSeenMiddleware
 from app.core.rate_limit import PerClientRateLimitMiddleware
 from app.db.database import Base, engine as db_engine
-from app.routes import admin, auth, motions, progress_reports, sessions, users
+from app.routes import admin, auth, motions, progress_reports, sessions, shared, users
 from app.services import cleanup, engine, jobs
 from app.services.audio_convert import ffmpeg_available
 
@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 
 API_PREFIX = "/v1"
+
+SHARED_LOOKUPS_PER_MINUTE = 20
 
 
 @asynccontextmanager
@@ -126,6 +128,9 @@ app.add_middleware(
     PerClientRateLimitMiddleware,
     max_requests_per_minute=settings.request_rate_limit_per_minute,
     trust_forwarded_for=settings.trust_forwarded_for,
+    # Public share-link lookups (no sign-in needed) get their own,
+    # tighter per-client budget on top of the global one.
+    path_limits={f"{API_PREFIX}/shared/": SHARED_LOOKUPS_PER_MINUTE},
 )
 
 app.add_middleware(LastSeenMiddleware)
@@ -136,6 +141,7 @@ app.include_router(users.router, prefix=API_PREFIX)
 app.include_router(sessions.router, prefix=API_PREFIX)
 app.include_router(progress_reports.router, prefix=API_PREFIX)
 app.include_router(motions.router, prefix=API_PREFIX)
+app.include_router(shared.router, prefix=API_PREFIX)
 app.include_router(admin.router, prefix=API_PREFIX)
 
 

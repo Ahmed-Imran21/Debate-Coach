@@ -198,6 +198,8 @@ export interface SessionSummary {
   id: string;
   title: string | null;
   status: SessionStatus;
+  /** True while the session has an active share link. Optional: older backends omit it. */
+  shared?: boolean;
   /** The practice motion, or null for "No prompt". Optional: older backends omit it. */
   motion?: Motion | null;
   progress: number;
@@ -568,4 +570,69 @@ export interface Motion {
   title: string;
   /** The motion itself: "This house would ...". */
   description: string;
+}
+
+/* ---------------------------------------------------------- */
+/* Visual view: what the visual components actually read       */
+/* ---------------------------------------------------------- */
+
+/**
+ * The subset of a report that VisualDeliverySection and
+ * KeyMomentsList render. The owner's full SessionReport satisfies it,
+ * and so does the public SharedReport, whose visual data the backend
+ * cuts down to exactly these fields (app/schemas/share.py).
+ */
+export type ObservationView = Pick<
+  MomentObservation,
+  "id" | "kind" | "type" | "duration_s" | "direction" | "metric" | "unit_value" | "session_value"
+>;
+
+export type MomentView = Pick<CorrelatedMoment, "id" | "polarity" | "start" | "end" | "excerpt_text" | "salience"> & {
+  anchor: Pick<CorrelatedMoment["anchor"], "type">;
+  observations: ObservationView[];
+};
+
+export type VisualFeedbackItemView = Pick<VisualFeedbackItem, "id" | "category" | "polarity" | "moment_id" | "coaching">;
+
+export interface VisualView {
+  video_analysis_status: VideoAnalysisStatus;
+  video_unavailable_reason: string | null;
+  visual_coaching_status: VisualCoachingStatus;
+  video_analysis: {
+    quality: { context: Pick<VideoAnalysisQuality["context"], "setting">; warnings: string[] };
+    metrics: Record<string, Pick<VisualMetric, "status" | "value" | "confidence">>;
+  } | null;
+  correlated_moments: MomentView[] | null;
+  visual_feedback: { visual_feedback: VisualFeedbackItemView[] } | null;
+}
+
+/* ---------------------------------------------------------- */
+/* Share links                                                 */
+/* ---------------------------------------------------------- */
+
+export interface ShareStatus {
+  sharing: boolean;
+  created_at: string | null;
+}
+
+/** The token is returned once, on creation; only its hash is stored. */
+export interface ShareCreated {
+  token: string;
+  created_at: string;
+}
+
+/** GET /v1/shared/{token}: the public, whitelisted report. */
+export interface SharedReport extends VisualView {
+  title: string | null;
+  recorded_at: string;
+  motion: { title: string; description: string } | null;
+  scores: Partial<Record<Category | "overall", number | null>>;
+  feedback: Array<Pick<FeedbackItem, "category" | "title" | "issue" | "severity" | "evidence" | "explanation" | "recommendation">>;
+  delivery: {
+    words_per_minute: number | null;
+    speech_duration: number | null;
+    filler_count: number | null;
+    pause_count: number | null;
+    stutter_count: number | null;
+  };
 }

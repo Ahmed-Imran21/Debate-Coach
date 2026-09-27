@@ -213,3 +213,27 @@ def client_for(app_module, db, fake_storage, fake_jobs, video_flag):
 
     yield _client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limit_counters():
+    """
+    The app is built once per test session, so its rate limiter's
+    in-memory counters would otherwise carry over from test to test
+    (the share-link lookup budget is only 20 a minute). Each test
+    starts with empty counters. Doesn't import the app if no test
+    has yet.
+    """
+    import sys
+
+    main = sys.modules.get("app.main")
+    node = getattr(getattr(main, "app", None), "middleware_stack", None)
+    if node is not None:
+        from app.core.rate_limit import PerClientRateLimitMiddleware
+
+        while node is not None:
+            if isinstance(node, PerClientRateLimitMiddleware):
+                node._hits.clear()
+                break
+            node = getattr(node, "app", None)
+    yield

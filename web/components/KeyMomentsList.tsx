@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 
 import { formatClock } from "@/components/SpeechTrack";
-import type { CorrelatedMoment, MomentObservation, SessionReport, VisualFeedbackItem } from "@/lib/types";
+import type { MomentView, ObservationView, VisualFeedbackItemView, VisualView } from "@/lib/types";
 
 const UNIT_TYPE_LABEL: Record<string, string> = {
   claim: "Claim",
@@ -9,7 +9,7 @@ const UNIT_TYPE_LABEL: Record<string, string> = {
   conclusion: "Conclusion",
 };
 
-function describeObservation(obs: MomentObservation): string | null {
+function describeObservation(obs: ObservationView): string | null {
   if (obs.kind === "event" && obs.type === "gaze_away") {
     const direction = obs.direction ?? "away";
     return `Looked ${direction} for ${(obs.duration_s ?? 0).toFixed(1)}s`;
@@ -43,7 +43,7 @@ function MomentBody({
   coaching,
   onSeek,
 }: {
-  moment: CorrelatedMoment;
+  moment: MomentView;
   coaching: string | null;
   onSeek: ((seconds: number) => void) | null;
 }): ReactElement {
@@ -92,7 +92,7 @@ export default function KeyMomentsList({
   report,
   onSeek,
 }: {
-  report: SessionReport;
+  report: VisualView;
   onSeek?: (seconds: number) => void;
 }): ReactElement | null {
   const moments = report.correlated_moments ?? [];
@@ -100,7 +100,7 @@ export default function KeyMomentsList({
 
   const momentsById = new Map(moments.map((m) => [m.id, m]));
   const feedbackItems = report.visual_feedback?.visual_feedback ?? [];
-  const coachingByMomentId = new Map<string, VisualFeedbackItem>();
+  const coachingByMomentId = new Map<string, VisualFeedbackItemView>();
   for (const item of feedbackItems) {
     if (item.moment_id) coachingByMomentId.set(item.moment_id, item);
   }
@@ -112,12 +112,12 @@ export default function KeyMomentsList({
   // coaching text" for a failed visual_coaching_status.
   const showRaw = report.visual_coaching_status !== "completed" || coachingByMomentId.size === 0;
 
-  const entries: Array<{ moment: CorrelatedMoment; coaching: string | null; key: string }> = showRaw
+  const entries: Array<{ moment: MomentView; coaching: string | null; key: string }> = showRaw
     ? [...moments].sort((a, b) => b.salience - a.salience).map((moment) => ({ moment, coaching: null, key: moment.id }))
     : feedbackItems
         .filter((item) => item.moment_id && momentsById.has(item.moment_id))
         .map((item) => ({
-          moment: momentsById.get(item.moment_id as string) as CorrelatedMoment,
+          moment: momentsById.get(item.moment_id as string) as MomentView,
           coaching: item.coaching,
           key: item.id,
         }));

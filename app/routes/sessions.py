@@ -24,7 +24,8 @@ from app.schemas.session import (
     SessionStartRequest,
     motion_out,
 )
-from app.services import jobs, pipeline, storage, visual_signals
+from app.schemas.share import ShareCreatedOut, ShareStatusOut
+from app.services import jobs, pipeline, shares, storage, visual_signals
 from app.services.category_scores import CATEGORY_COLUMNS
 from visual_analysis import config as visual_config
 from visual_analysis.signals import SignalValidationError
@@ -94,9 +95,10 @@ def _apply_video_fields(target: SessionOut | SessionCreateResponse, video: Video
         target.visual_coaching_status = video.coaching_status
 
 
-def _session_out(debate_session: DebateSession, video: VideoAnalysis | None) -> SessionOut:
+def _session_out(debate_session: DebateSession, video: VideoAnalysis | None, shared: bool = False) -> SessionOut:
     out = SessionOut.model_validate(debate_session)
     out.motion = motion_out(debate_session.motion_id)
+    out.shared = shared
     _apply_video_fields(out, video)
     return out
 
@@ -422,9 +424,11 @@ def list_sessions(
         .all()
     )
 
-    videos = _video_rows(db, [row.id for row in rows])
+    ids = [row.id for row in rows]
+    videos = _video_rows(db, ids)
+    shared = shares.shared_session_ids(db, ids)
 
-    return [_session_out(row, videos.get(row.id)) for row in rows]
+    return [_session_out(row, videos.get(row.id), row.id in shared) for row in rows]
 
 
 # ============================================================
@@ -491,7 +495,11 @@ def get_session(
         current_user,
         db,
     )
-    return _session_out(debate_session, _video_row(db, session_id))
+    return _session_out(
+        debate_session,
+        _video_row(db, session_id),
+        shares.active_share(db, session_id) is not None,
+    )
 
 
 @router.get(
@@ -609,6 +617,57 @@ def get_session_report(
                 report.visual_feedback = feedback_doc
 
     return report
+
+
+# ============================================================
+# SHARE LINK (owner only)
+#
+# _get_owned_session answers 404 for anyone but the owner, the same
+# as for a session that doesn't exist. The public side of a link is
+# app/routes/shared.py.
+# ============================================================
+
+@router.get("/{session_id}/share", response_model=ShareStatusOut)
+def get_share(
+    session_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ShareStatusOut:
+    _get_owned_session(session_id, current_user, db)
+    share = shares.active_share(db, session_id)
+    return ShareStatusOut(sharing=share is not None, created_at=share.created_at if share else None)
+
+
+@router.post("/{session_id}/share", response_model=ShareCreatedOut, status_code=status.HTTP_201_CREATED)
+def create_share(
+    session_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ShareCreatedOut:
+    """
+    Create a link, or replace the current one: the old link stops
+    working immediately. The token is returned this once; only its
+    hash is stored.
+    """
+
+    debate_session = _get_owned_session(session_id, current_user, db)
+    if debate_session.status != SessionStatus.completed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only a finished report can be shared.",
+        )
+    token, share = shares.create_or_replace(db, session_id)
+    return ShareCreatedOut(token=token, created_at=share.created_at)
+
+
+@router.delete("/{session_id}/share", status_code=status.HTTP_204_NO_CONTENT)
+def stop_sharing(
+    session_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    _get_owned_session(session_id, current_user, db)
+    shares.revoke(db, session_id)
 
 
 # ============================================================

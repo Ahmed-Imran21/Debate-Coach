@@ -229,7 +229,14 @@ function SessionRow({
   const body = (
     <>
       <div>
-        <div className="row-title">{name}</div>
+        <div className="row-title">
+          {name}
+          {session.shared && (
+            <span className="state" style={{ marginLeft: "0.625rem", verticalAlign: "middle" }}>
+              Shared
+            </span>
+          )}
+        </div>
 
         <div className="row-meta">
           {session.motion && <>Motion: {session.motion.title}. </>}
