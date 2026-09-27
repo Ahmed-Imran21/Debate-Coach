@@ -21,10 +21,12 @@ from app.schemas.admin import (
     AdminWhoAmIOut,
     KeyUsageOut,
     StorageUsageOut,
+    WhisperKeyUsageOut,
 )
 from app.services import admin_users, engine, storage
 from app.services.accounts import AccountBusyError, delete_user_account
 from app.services.key_usage import get_usage_snapshot
+from app.services.whisper_usage import get_whisper_usage_snapshot
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -68,6 +70,10 @@ def stats(
         KeyUsageOut(**entry)
         for entry in get_usage_snapshot(api_client)
     ]
+    whisper_keys = [
+        WhisperKeyUsageOut(**entry)
+        for entry in get_whisper_usage_snapshot(api_client.whisper_client)
+    ]
 
     used_bytes = storage.total_bytes_used()
     used_gb = used_bytes / (1024 ** 3)
@@ -77,6 +83,7 @@ def stats(
         active_users=active_users or 0,
         total_signups=total_signups or 0,
         keys=keys,
+        whisper_keys=whisper_keys,
         storage=StorageUsageOut(
             used_bytes=used_bytes,
             used_gb=round(used_gb, 3),

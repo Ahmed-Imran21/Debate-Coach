@@ -9,7 +9,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from dotenv import load_dotenv
 from groq import Groq
@@ -240,7 +240,18 @@ class WhisperClient:
     def __init__(
         self,
         worker_count: int = WHISPER_WORKERS,
+        on_usage: Optional[Callable[..., None]] = None,
     ):
+        """
+        on_usage: optional hook called once per transcription
+        attempt, successful or not, as on_usage(key_id,
+        audio_seconds=float, outcome="ok"|"failed"|"rate_limited").
+        It's how the app persists usage for the admin dashboard
+        (app/services/whisper_usage.py) without api/ importing
+        app/. It never affects scheduling, and an error inside it
+        never affects the transcription. Defaults to a no-op (the
+        CLI and tests).
+        """
 
         if worker_count < 1:
             raise ValueError(
@@ -248,6 +259,8 @@ class WhisperClient:
             )
 
         self._lock = threading.Condition()
+
+        self._on_usage = on_usage
 
         self._keys: list[WhisperKey] = []
 
@@ -521,14 +534,24 @@ class WhisperClient:
 
             request.result = result
 
+            self._report_usage(key.id, audio_seconds, "ok")
+
         except Exception as error:
+
+            rate_limited = self._is_rate_limit_error(error)
+
+            self._report_usage(
+                key.id,
+                audio_seconds,
+                "rate_limited" if rate_limited else "failed",
+            )
 
             # ------------------------------------------------
             # If Groq reports a rate limit, put this key into
             # a cooldown so other keys are preferred.
             # ------------------------------------------------
 
-            if self._is_rate_limit_error(error):
+            if rate_limited:
 
                 retry_after = (
                     self._get_retry_after(error)
@@ -1089,6 +1112,29 @@ class WhisperClient:
             self._cleanup_usage()
 
             self._lock.notify_all()
+
+    def _report_usage(
+        self,
+        key_id: str,
+        audio_seconds: float,
+        outcome: str,
+    ) -> None:
+        """
+        Hand one attempt to the on_usage hook. Never raises: a
+        dashboard-counter failure must not break a transcription.
+        """
+
+        if self._on_usage is None:
+            return
+
+        try:
+            self._on_usage(
+                key_id,
+                audio_seconds=audio_seconds,
+                outcome=outcome,
+            )
+        except Exception:
+            pass
 
     # ========================================================
     # CLEANUP

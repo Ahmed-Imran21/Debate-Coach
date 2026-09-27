@@ -11,6 +11,7 @@ import {
   redirectToLoginAfterSessionExpiry,
 } from "@/lib/api";
 import { getAdminStats } from "./admin-api";
+import { formatAudio, whisperDetail } from "./whisper";
 import SiteHeader from "@/components/SiteHeader";
 import type { AdminStats } from "@/lib/types";
 
@@ -170,6 +171,49 @@ export default function AdminPage(): ReactElement {
                   {stats.keys.length === 0 && (
                     <p className="note">No API keys are currently configured.</p>
                   )}
+
+                  {/* Transcription keys: requests and audio time, never tokens. */}
+                  {(stats.whisper_keys ?? []).map((key) => (
+                    <div
+                      key={key.key_id}
+                      style={{ marginBottom: "1.5rem" }}
+                    >
+                      <h3
+                        style={{
+                          fontSize: "0.9375rem",
+                          fontWeight: 600,
+                          marginBottom: "0.5rem",
+                        }}
+                      >
+                        {key.label}
+                      </h3>
+                      <div className="bars">
+                        <UsageBarRow
+                          label="Requests, 24 h"
+                          labelWidth="7.5rem"
+                          used={key.requests_last_24h}
+                          limit={key.requests_per_day_limit}
+                        />
+                        <UsageBarRow
+                          label="Audio, 1 h"
+                          labelWidth="7.5rem"
+                          used={key.audio_seconds_last_hour}
+                          limit={key.audio_seconds_per_hour_limit}
+                          format={formatAudio}
+                        />
+                        <UsageBarRow
+                          label="Audio, 24 h"
+                          labelWidth="7.5rem"
+                          used={key.audio_seconds_last_24h}
+                          limit={key.audio_seconds_per_day_limit}
+                          format={formatAudio}
+                        />
+                      </div>
+                      <p className="note" style={{ marginTop: "0.5rem" }}>
+                        {whisperDetail(key)}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </>
             )}
@@ -184,24 +228,29 @@ function UsageBarRow({
   label,
   used,
   limit,
+  format = (n: number) => n.toLocaleString(),
+  labelWidth = "6rem",
 }: {
   label: string;
   used: number;
   limit: number;
+  /** How to print used / limit; numbers by default, minutes:seconds for audio. */
+  format?: (value: number) => string;
+  labelWidth?: string;
 }): ReactElement {
   const percent = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
 
   return (
     <div
       className="bar-row"
-      style={{ gridTemplateColumns: "6rem 1fr 10rem" }}
+      style={{ gridTemplateColumns: `${labelWidth} 1fr 10rem` }}
     >
       <span className="bar-label">{label}</span>
       <div className="bar-track">
         <div className="bar-fill" style={{ width: `${percent}%` }} />
       </div>
       <span className="bar-value" style={{ whiteSpace: "nowrap" }}>
-        {used.toLocaleString()} / {limit.toLocaleString()}
+        {format(used)} / {format(limit)}
       </span>
     </div>
   );
