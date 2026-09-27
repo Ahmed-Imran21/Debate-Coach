@@ -176,16 +176,50 @@ def test_level_trends_compare_earliest_with_most_recent():
         session(1, 3, {"argumentation": TYPICAL, "logic": TYPICAL}),
         session(2, 3, {"argumentation": CLEAR, "logic": TYPICAL}),
     ])["levels"]
-    assert trends["argumentation"] == f"improved: from {MOSTLY} to {CLEAR}"
-    assert trends["logic"] == f"got worse: from {CLEAR} to {TYPICAL}"
-    assert trends["structure"] == f"stayed the same: {TYPICAL}"
+    assert trends["argumentation"] == f"improved: from {MOSTLY} to {CLEAR}"  # two levels
+    assert trends["logic"] == f"got worse: from {CLEAR} to {TYPICAL}"  # one level, but steadily over three sessions
+    assert trends["structure"] == f"about the same: {TYPICAL}"
 
 
-def test_a_level_that_dipped_and_recovered_is_not_called_steady():
+def test_a_one_level_gain_after_a_dip_is_about_the_same():
     trends = prompt.build_trends([
         session(0, 3, {"logic": TYPICAL}), session(1, 3, {"logic": MOSTLY}), session(2, 3, {"logic": CLEAR}),
-    ])["levels"]
-    assert trends["logic"] == f"improved, though not steadily: from {TYPICAL} to {CLEAR}"
+    ])
+    assert trends["levels"]["logic"] == f"about the same: {CLEAR}"
+    assert trends["clearest_improvement"] is None
+
+
+# ---------------------------------------------------------------
+# Scoring noise: one level between two sessions is not a trend
+# ---------------------------------------------------------------
+
+@pytest.mark.parametrize("before, after", [(TYPICAL, CLEAR), (CLEAR, TYPICAL), (MOSTLY, TYPICAL), (TYPICAL, MOSTLY)])
+def test_one_level_between_two_sessions_is_about_the_same(before, after):
+    trends = prompt.build_trends([session(0, 2, {"rebuttal": before}), session(1, 2, {"rebuttal": after})])
+    assert trends["levels"]["rebuttal"] == f"about the same: {after}"
+    assert trends["clearest_improvement"] is None
+    assert trends["got_worse"] == []
+
+
+def test_two_levels_between_two_sessions_count_both_ways():
+    up = prompt.build_trends([session(0, 2, {"logic": MOSTLY}), session(1, 2, {"logic": CLEAR})])
+    down = prompt.build_trends([session(0, 2, {"logic": CLEAR}), session(1, 2, {"logic": MOSTLY})])
+    assert up["levels"]["logic"] == f"improved: from {MOSTLY} to {CLEAR}"
+    assert up["clearest_improvement"] == f"logic level improved from {MOSTLY} to {CLEAR}"
+    assert down["levels"]["logic"] == f"got worse: from {CLEAR} to {MOSTLY}"
+    assert down["got_worse"] == [f"logic level got worse, from {CLEAR} to {MOSTLY}"]
+
+
+def test_three_sessions_moving_one_level_steadily_count():
+    up = prompt.build_trends([session(0, 3, {"logic": TYPICAL}), session(1, 3, {"logic": TYPICAL}), session(2, 3, {"logic": CLEAR})])
+    down = prompt.build_trends([session(0, 3, {"logic": CLEAR}), session(1, 3, {"logic": TYPICAL}), session(2, 3, {"logic": TYPICAL})])
+    assert up["levels"]["logic"] == f"improved: from {TYPICAL} to {CLEAR}"
+    assert down["got_worse"] == [f"logic level got worse, from {CLEAR} to {TYPICAL}"]
+
+
+def test_a_swing_that_ends_where_it_started_is_about_the_same():
+    trends = prompt.build_trends([session(0, 3, {"logic": TYPICAL}), session(1, 3, {"logic": CLEAR}), session(2, 3, {"logic": TYPICAL})])
+    assert trends["levels"]["logic"] == f"about the same: {TYPICAL}"
 
 
 def test_rebuttal_not_scored_everywhere_but_once_is_not_a_trend():
@@ -289,11 +323,12 @@ def test_trends_and_prompt_carry_no_digits():
 
 def test_every_worse_trend_is_listed_for_the_model_to_mention():
     trends = prompt.build_trends([
-        session(0, 2, {"logic": CLEAR, "structure": MOSTLY}, {"filler_words": "none", "pace": "comfortable"}),
-        session(1, 2, {"logic": TYPICAL, "structure": CLEAR}, {"filler_words": "many", "pace": "fast"}),
+        session(0, 2, {"logic": CLEAR, "structure": MOSTLY, "persuasion": CLEAR}, {"filler_words": "none", "pace": "comfortable"}),
+        session(1, 2, {"logic": MOSTLY, "structure": CLEAR, "persuasion": TYPICAL}, {"filler_words": "many", "pace": "fast"}),
     ])
+    # persuasion dropped one level only: noise, so not listed.
     assert trends["got_worse"] == [
-        f"logic level got worse, from {CLEAR} to {TYPICAL}",
+        f"logic level got worse, from {CLEAR} to {MOSTLY}",
         "pace got worse, from comfortable to fast",
         "filler words got worse, from none to many",
     ]

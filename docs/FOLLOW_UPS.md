@@ -3,32 +3,6 @@
 Small, known issues that are not urgent. Each entry says what was
 seen, why it is harmless for now, and what a fix would involve.
 
-## Coaching score noise can look like a trend in a progress report
-
-**Seen:** on the Feature 2 canary (2026-09-26), the same recording
-was run through the pipeline twice. Rebuttal and logic came back a
-level apart, 60 then 40, with nothing different in the speech. The
-progress report then described both as having "slipped", which is
-faithful to the scores but reports noise as a trend. The same
-one-level wobble showed up in earlier calibration runs (the space
-speech's rebuttal scored 40/60/40 across three runs).
-
-**Why it matters:** a report over only 2 sessions compares two
-single samples, so a one-level move can easily be scoring variance
-rather than a real change.
-
-**Options (not done):**
-1. In `progress_report/prompt.py` (`_level_trends`), only call a
-   level trend when it moves two or more levels, or moves in a
-   consistent direction across three or more sessions. Otherwise
-   report it as "about the same".
-2. Reduce the variance at the source: in the coaching engine
-   (`coaching_engine/llm/prompts.py`), for example with a lower
-   temperature or more tightly anchored rubric levels. Re-verify
-   calibration afterwards.
-
-Either change needs real test runs, like the earlier calibration work.
-
 ## The first request after idle can take about 27 seconds
 
 **Seen:** 2026-09-26 07:40 UTC. The backend had scaled to zero; a

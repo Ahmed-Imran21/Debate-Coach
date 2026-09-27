@@ -37,7 +37,7 @@ import json
 import re
 from typing import Any, Optional
 
-PROMPT_VERSION = "progress-report-1.3"
+PROMPT_VERSION = "progress-report-1.4"
 
 MAX_BULLETS = 5
 
@@ -74,7 +74,7 @@ SYSTEM_PROMPT = f"""You are a supportive, honest debate coach writing a short pr
 Your job is to describe how the speaker is changing over time. Do not re-coach any single speech.
 
 Use the trends block as the facts. Do not work out your own trends from the session summaries.
-- trends.levels says, per area, whether the level improved, got worse or stayed the same from the earliest to the most recent session.
+- trends.levels says, per area, whether the level improved, got worse or stayed about the same from the earliest to the most recent session. "About the same" includes small moves that are within normal scoring variation: never describe those as an improvement or a decline.
 - trends.delivery says the same for pace, filler words, stutters and pauses.
 - trends.recurring_points lists the only specific feedback points that appear in more than one session.
 - trends.areas_weak_in_several_sessions lists areas that had a weakness in several sessions where it is NOT known whether it was the same issue.
@@ -255,15 +255,31 @@ def _join(names: list[str], total: int) -> str:
     return f"the {', '.join(names[:-1])} and {names[-1]} sessions"
 
 
-def _direction(values: list[int]) -> str:
-    """Earliest vs most recent, noting when it didn't move steadily."""
+def _direction(values: list[int]) -> int:
+    """
+    +1 improved, -1 got worse, 0 about the same.
+
+    The same speech can score a level apart from one run to the next,
+    so a one-level move between two sessions is noise, not a trend. A
+    level only counts as having moved if:
+    - it moved two or more levels from the earliest to the latest
+      session; or
+    - with three or more sessions, it moved at least one level overall
+      and every step went the same way (never back).
+    Anything else is "about the same". The progress graph still shows
+    the raw scores; this only governs what the report may call a trend.
+    """
+
     first, last = values[0], values[-1]
+    change = last - first
+    if abs(change) >= 2:
+        return 1 if change > 0 else -1
     steps = [b - a for a, b in zip(values, values[1:])]
-    if last > first:
-        return "improved" + ("" if all(s >= 0 for s in steps) else ", though not steadily")
-    if last < first:
-        return "got worse" + ("" if all(s <= 0 for s in steps) else ", though not steadily")
-    return "stayed the same" if all(s == 0 for s in steps) else "went up and down, ending where it started"
+    if len(values) >= 3 and change > 0 and all(step >= 0 for step in steps):
+        return 1
+    if len(values) >= 3 and change < 0 and all(step <= 0 for step in steps):
+        return -1
+    return 0
 
 
 def _level_trends(summaries: list[dict]) -> tuple[dict, list[tuple[int, str]], list[str]]:
@@ -279,11 +295,14 @@ def _level_trends(summaries: list[dict]) -> tuple[dict, list[tuple[int, str]], l
         values = [LEVEL_BANDS.index(band) for _, band in scored]
         direction = _direction(values)
         first, last = scored[0][1], scored[-1][1]
-        trends[area] = f"{direction}: {last}" if first == last else f"{direction}: from {first} to {last}"
-        if values[-1] > values[0]:
+        if direction > 0:
+            trends[area] = f"improved: from {first} to {last}"
             improvements.append((values[-1] - values[0], f"{area} level improved from {first} to {last}"))
-        elif values[-1] < values[0]:
+        elif direction < 0:
+            trends[area] = f"got worse: from {first} to {last}"
             worse.append(f"{area} level got worse, from {first} to {last}")
+        else:
+            trends[area] = f"about the same: {last}"
     return trends, improvements, worse
 
 
