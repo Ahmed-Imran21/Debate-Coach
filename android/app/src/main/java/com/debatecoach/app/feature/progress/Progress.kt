@@ -20,8 +20,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.debatecoach.app.core.Backend
@@ -152,6 +153,7 @@ data class ProgressState(
     val count: Int = 5,
     val generating: Boolean = false,
     val generateError: String? = null,
+    val refreshing: Boolean = false,
 )
 
 class ProgressViewModel(private val backend: Backend) : ViewModel() {
@@ -169,12 +171,15 @@ class ProgressViewModel(private val backend: Backend) : ViewModel() {
         loadChart()
     }
 
-    /** A slower response for an earlier selection never overwrites the current one. */
-    fun loadChart() {
+    /**
+     * A slower response for an earlier selection never overwrites the current one.
+     * [quiet] keeps the current chart on screen while it reloads (a refresh, not a new selection).
+     */
+    fun loadChart(quiet: Boolean = false): Job {
         chartJob?.cancel()
-        _state.update { it.copy(points = null, chartError = null, active = null) }
+        if (!quiet) _state.update { it.copy(points = null, chartError = null, active = null) }
         val (metric, range) = _state.value.let { it.metric to it.range }
-        chartJob = viewModelScope.launch {
+        return viewModelScope.launch {
             try {
                 val rows = backend.progress(metric, range)
                 _state.update { it.copy(points = rows) }
@@ -182,12 +187,12 @@ class ProgressViewModel(private val backend: Backend) : ViewModel() {
                 if (error is kotlinx.coroutines.CancellationException) throw error
                 if (!(error is ApiException && error.status == 401)) _state.update { it.copy(chartError = "Could not load your progress.") }
             }
-        }
+        }.also { chartJob = it }
     }
 
     fun select(index: Int?) = _state.update { it.copy(active = index) }
 
-    fun loadLatest() {
+    fun loadLatest(): Job =
         viewModelScope.launch {
             try {
                 val latest = backend.latestProgressReport()
@@ -195,6 +200,17 @@ class ProgressViewModel(private val backend: Backend) : ViewModel() {
             } catch (error: Exception) {
                 if (!(error is ApiException && error.status == 401)) _state.update { it.copy(latestError = "Could not load your progress report.") }
             }
+        }
+
+    /** Pull to refresh: picks up what the website changed (a new report, a deleted session). */
+    fun refresh() {
+        if (_state.value.refreshing) return
+        _state.update { it.copy(refreshing = true) }
+        viewModelScope.launch {
+            val chart = loadChart(quiet = true)
+            loadLatest().join()
+            chart.join()
+            _state.update { it.copy(refreshing = false) }
         }
     }
 
@@ -236,42 +252,45 @@ fun ProgressTab(vm: ProgressViewModel, completedCount: Int, contentPadding: Padd
     val state by vm.state.collectAsStateWithLifecycle()
 
     // A new finished session (completedCount changes) refetches both,
-    // as the website's refreshKey does.
-    LaunchedEffect(completedCount) {
-        vm.loadChart()
+    // as the website's refreshKey does; so does coming back to the app.
+    LifecycleStartEffect(completedCount) {
+        vm.loadChart(quiet = vm.state.value.points != null)
         vm.loadLatest()
+        onStopOrDispose {}
     }
 
-    LazyColumn(
-        Modifier.fillMaxSize().testTag("progress-tab"),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = contentPadding.calculateBottomPadding() + 32.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        item { SectionTitle("Your progress") }
-        item {
-            ChipRow(label = "Score type") {
-                METRIC_OPTIONS.forEach { (value, label) -> FilterChip(label, state.metric == value, { vm.setMetric(value) }) }
-            }
-        }
-        item {
-            ChipRow(label = "Range") {
-                RANGE_OPTIONS.forEach { (value, label) -> FilterChip(label, state.range == value, { vm.setRange(value) }) }
-            }
-        }
-        item {
-            val points = state.points
-            when {
-                state.chartError != null -> Alert(state.chartError!!, quiet = true)
-                points == null -> Loading()
-                else -> {
-                    val chart = buildChart(points)
-                    if (!chart.enough) Note("Not enough sessions in this range yet.")
-                    else ProgressChartView(chart, metricLabel(state.metric), state.active, vm::select)
+    PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize().testTag("progress-tab"),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = contentPadding.calculateBottomPadding() + 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item { SectionTitle("Your progress") }
+            item {
+                ChipRow(label = "Score type") {
+                    METRIC_OPTIONS.forEach { (value, label) -> FilterChip(label, state.metric == value, { vm.setMetric(value) }) }
                 }
             }
+            item {
+                ChipRow(label = "Range") {
+                    RANGE_OPTIONS.forEach { (value, label) -> FilterChip(label, state.range == value, { vm.setRange(value) }) }
+                }
+            }
+            item {
+                val points = state.points
+                when {
+                    state.chartError != null -> Alert(state.chartError!!, quiet = true)
+                    points == null -> Loading()
+                    else -> {
+                        val chart = buildChart(points)
+                        if (!chart.enough) Note("Not enough sessions in this range yet.")
+                        else ProgressChartView(chart, metricLabel(state.metric), state.active, vm::select)
+                    }
+                }
+            }
+            item { SectionTitle("Progress report", Modifier.padding(top = 16.dp)) }
+            item { ProgressReportPanel(state, completedCount, vm) }
         }
-        item { SectionTitle("Progress report", Modifier.padding(top = 16.dp)) }
-        item { ProgressReportPanel(state, completedCount, vm) }
     }
 }
 

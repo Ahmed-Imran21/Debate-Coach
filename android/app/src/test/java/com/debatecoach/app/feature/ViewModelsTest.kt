@@ -183,6 +183,28 @@ class ProgressViewModelTest {
     }
 
     @Test
+    fun `pull to refresh reloads both, keeping the chart on screen meanwhile`() = runTest(main.dispatcher) {
+        var score = 50.0
+        val gate = CompletableDeferred<Unit>()
+        val backend = FakeBackend().apply {
+            progressHandler = { _, _ -> if (score > 50.0) gate.await(); listOf(ProgressPoint("a", "2026-09-01T00:00:00Z", null, score)) }
+        }
+        val vm = ProgressViewModel(backend)
+        vm.loadChart()
+        advanceUntilIdle()
+        score = 80.0 // changed on the website
+        vm.refresh()
+        runCurrent()
+        assertTrue(vm.state.value.refreshing)
+        assertEquals(50.0, vm.state.value.points!!.single().score!!, 0.0)
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(vm.state.value.refreshing)
+        assertEquals(80.0, vm.state.value.points!!.single().score!!, 0.0)
+        assertEquals(1, backend.calls.count { it == "latest" })
+    }
+
+    @Test
     fun `other failures show a message`() = runTest(main.dispatcher) {
         val backend = FakeBackend().apply { createReportHandler = { throw NetworkException(IOException("x")) } }
         val vm = ProgressViewModel(backend)
