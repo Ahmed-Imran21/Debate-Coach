@@ -33,6 +33,9 @@ data class SignupRequest(
     val password: String,
     @SerialName("first_name") val firstName: String,
     @SerialName("last_name") val lastName: String,
+    /** The two sign-up checkboxes; the backend refuses a sign-up without both. */
+    @SerialName("accepted_privacy_policy") val acceptedPrivacyPolicy: Boolean,
+    @SerialName("accepted_terms") val acceptedTerms: Boolean,
 )
 
 @Serializable

@@ -35,6 +35,9 @@ data class SessionUiState(
     val shareBusy: Boolean = false,
     val shareError: String? = null,
     val copied: Boolean = false,
+    val deleting: Boolean = false,
+    val deleted: Boolean = false,
+    val deleteError: String? = null,
 )
 
 /** The public URL for a share token, on the website (lib/share.ts shareUrl). */
@@ -141,6 +144,30 @@ class SessionViewModel(
     fun stopSharing() = runShare("Could not stop sharing. Try again.") {
         backend.stopSharing(sessionId)
         _state.update { it.copy(share = ShareUi.Private, copied = false) }
+    }
+
+    // ---------------------------------------------------------------
+    // Delete (the report's overflow menu)
+    // ---------------------------------------------------------------
+
+    fun delete() {
+        if (_state.value.deleting) return
+        _state.update { it.copy(deleting = true, deleteError = null) }
+        viewModelScope.launch {
+            try {
+                backend.deleteSession(sessionId)
+                stopPolling()
+                _state.update { it.copy(deleting = false, deleted = true) }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                val message = when {
+                    error is ApiException && error.status == 404 -> null.also { _state.update { s -> s.copy(deleted = true) } }
+                    error is ApiException && error.status == 401 -> null
+                    else -> "Could not delete that session. Try again."
+                }
+                _state.update { it.copy(deleting = false, deleteError = message) }
+            }
+        }
     }
 
     /** "Copied" for two seconds after copying, as on the web. */

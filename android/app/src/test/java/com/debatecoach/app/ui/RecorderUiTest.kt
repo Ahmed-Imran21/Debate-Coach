@@ -1,7 +1,9 @@
 package com.debatecoach.app.ui
 
 import android.Manifest
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -80,13 +82,14 @@ class RecorderUiTest {
 
         compose.onNodeWithTag("timer").assertIsDisplayed()
         compose.onNodeWithText("Recording in progress.").assertIsDisplayed()
+        compose.onNodeWithTag("level-meter").assertIsDisplayed()
         clock = 84_000.0 // the fake recorder started at 1,000 ms: 83 seconds
-        compose.onNodeWithTag("stop-recording").performScrollTo().performClick()
+        compose.onNodeWithTag("stop-recording").assertHeightIsAtLeast(48.dp).performClick()
         compose.waitForIdle()
 
         compose.onNodeWithText("Recording of 1:23").assertIsDisplayed()
-        compose.onNodeWithText("Name this session (optional)").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("submit-recording").performScrollTo().performClick()
+        compose.onNodeWithTag("title-field").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("submit-recording").assertIsDisplayed().performClick()
         try {
             compose.waitUntil(5_000) { uploaded != null }
         } catch (e: Throwable) {
@@ -106,12 +109,14 @@ class RecorderUiTest {
         compose.onNodeWithTag("start-recording").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Visual feedback (optional)").assertIsDisplayed()
-        compose.onNodeWithText("No video is recorded, uploaded, or saved. No identity recognition. No emotion detection.").assertIsDisplayed()
+        compose.onNodeWithText("No video is recorded, uploaded, or saved. No identity recognition. No emotion detection.").performScrollTo().assertIsDisplayed()
 
-        compose.onNodeWithTag("consent-out").performScrollTo().performClick()
+        compose.onNodeWithTag("consent-out").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("Speak as you would in a round. Debate Coach will ask for microphone access the first time. Visual feedback is off.").assertIsDisplayed()
-        compose.onNodeWithText("Change visual feedback setting").assertIsDisplayed()
+        compose.onNodeWithText("Visual feedback is off.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("change-consent").performScrollTo().assertIsDisplayed().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Visual feedback (optional)").assertIsDisplayed()
     }
 
     @Test
@@ -121,12 +126,33 @@ class RecorderUiTest {
         compose.waitForIdle()
         vm.setMotion("carbon-tax")
         compose.waitForIdle()
-        compose.onNodeWithText("This house would introduce a carbon tax. Your coaching will also judge how well you address it.").assertIsDisplayed()
+        compose.onNodeWithText("This house would introduce a carbon tax.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Your coaching will also judge how well you address it.").performScrollTo().assertIsDisplayed()
 
         compose.onNodeWithTag("start-recording").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("This house would introduce a carbon tax.").assertIsDisplayed()
         vm.stopRecording()
+    }
+
+    @Test
+    fun discarding_a_recording_asks_first() {
+        val vm = viewModel(videoEnabled = false)
+        compose.setContent { DebateCoachTheme { RecorderContent(vm, online = true, onClose = {}, onUploaded = {}) } }
+        compose.onNodeWithTag("start-recording").performClick()
+        compose.waitForIdle()
+        clock = 10_000.0
+        compose.onNodeWithTag("stop-recording").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("discard-recording").performClick()
+        compose.onNodeWithText("Discard this recording?").assertIsDisplayed()
+        compose.onNodeWithText("Keep").performClick()
+        compose.waitForIdle()
+        assertEquals(com.debatecoach.app.feature.recorder.Phase.REVIEW, vm.state.value.phase)
+        compose.onNodeWithTag("discard-recording").performClick()
+        compose.onNodeWithTag("confirm-discard").performClick()
+        compose.waitForIdle()
+        assertEquals(com.debatecoach.app.feature.recorder.Phase.IDLE, vm.state.value.phase)
     }
 
     @Test

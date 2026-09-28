@@ -37,7 +37,7 @@ interface Backend {
     /** Emits when the user must see the sign-in screen again, and why. */
     val signedOut: Flow<SignOutReason>
 
-    suspend fun signUp(email: String, password: String, firstName: String, lastName: String)
+    suspend fun signUp(email: String, password: String, firstName: String, lastName: String, acceptedPrivacyPolicy: Boolean, acceptedTerms: Boolean)
     suspend fun signIn(email: String, password: String)
     fun signOut()
     suspend fun deleteAccount(password: String)
@@ -70,8 +70,10 @@ class RemoteBackend(private val api: ApiClient, private val tokens: TokenStore) 
 
     private val s get() = api.service
 
-    override suspend fun signUp(email: String, password: String, firstName: String, lastName: String) {
-        val t = api.request(Method.POST, auth = false) { s.signup(SignupRequest(email, password, firstName, lastName)) }
+    override suspend fun signUp(email: String, password: String, firstName: String, lastName: String, acceptedPrivacyPolicy: Boolean, acceptedTerms: Boolean) {
+        val t = api.request(Method.POST, auth = false) {
+            s.signup(SignupRequest(email, password, firstName, lastName, acceptedPrivacyPolicy, acceptedTerms))
+        }
         tokens.store(t)
     }
 

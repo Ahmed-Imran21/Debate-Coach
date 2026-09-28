@@ -26,6 +26,12 @@ val localWebsiteUrl = (findProperty("localWebsiteUrl") as String?) ?: localApiUr
 val productionVideoAnalysis = (findProperty("productionVideoAnalysis") as String?)?.toBoolean() ?: true
 val localVideoAnalysis = (findProperty("localVideoAnalysis") as String?)?.toBoolean() ?: true
 
+// -PsideBySide=true: a separate app id and name ("Debate Coach (new)"),
+// so this build installs next to the one already on the phone and the
+// two can be compared. Off by default: the real app id stays the same.
+val sideBySide = (findProperty("sideBySide") as String?)?.toBoolean() ?: false
+val appNameSuffix = if (sideBySide) " (new)" else ""
+
 android {
     namespace = "com.debatecoach.app"
     compileSdk = 37
@@ -34,8 +40,13 @@ android {
         applicationId = "com.debatecoach.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
+        if (sideBySide) applicationIdSuffix = ".redesign"
+        // debatecoach://sessions, /session/<id>, /record, /progress, /insights, /account
+        val scheme = if (sideBySide) "debatecoach-new" else "debatecoach"
+        manifestPlaceholders["deepLinkScheme"] = scheme
+        buildConfigField("String", "DEEP_LINK_SCHEME", "\"$scheme\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "MEDIAPIPE_VERSION", "\"${libs.versions.mediapipe.get()}\"")
     }
@@ -49,14 +60,14 @@ android {
             buildConfigField("String", "API_BASE_URL", "\"$localApiUrl\"")
             buildConfigField("String", "WEBSITE_URL", "\"$localWebsiteUrl\"")
             buildConfigField("boolean", "VIDEO_ANALYSIS_ENABLED", "$localVideoAnalysis")
-            resValue("string", "app_name", "Debate Coach (local)")
+            resValue("string", "app_name", "Debate Coach (local)$appNameSuffix")
         }
         create("production") {
             dimension = "backend"
             buildConfigField("String", "API_BASE_URL", "\"$productionApiUrl\"")
             buildConfigField("String", "WEBSITE_URL", "\"$productionWebsiteUrl\"")
             buildConfigField("boolean", "VIDEO_ANALYSIS_ENABLED", "$productionVideoAnalysis")
-            resValue("string", "app_name", "Debate Coach")
+            resValue("string", "app_name", "Debate Coach$appNameSuffix")
         }
     }
 
@@ -87,7 +98,20 @@ android {
             all { test ->
                 test.maxHeapSize = "3g"
                 test.systemProperty("robolectric.logging", "stdout")
+                // ./gradlew :app:testLocalDebugUnitTest --tests '*Screenshots*' -PscreenshotsDir=/some/dir
+                test.systemProperty("screenshots.dir", (findProperty("screenshotsDir") as String?) ?: "")
             }
+        }
+    }
+
+    // One APK per processor family (smaller downloads, and armeabi-v7a
+    // for older 32-bit phones), plus a universal one that runs anywhere.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = true
         }
     }
 
@@ -180,6 +204,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.browser)
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

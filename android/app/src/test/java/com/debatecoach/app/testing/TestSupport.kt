@@ -87,6 +87,7 @@ open class FakeBackend : Backend {
 
     var signInHandler: suspend (String, String) -> Unit = { _, _ -> }
     var signUpHandler: suspend (String, String, String, String) -> Unit = { _, _, _, _ -> }
+    var lastSignUpConsent: Pair<Boolean, Boolean>? = null
     var deleteAccountHandler: suspend (String) -> Unit = {}
     var sessionsHandler: suspend () -> List<SessionSummary> = { emptyList() }
     var getSessionHandler: suspend (String) -> SessionSummary = { session(it) }
@@ -103,8 +104,9 @@ open class FakeBackend : Backend {
     var createShareHandler: suspend (String) -> ShareCreated = { ShareCreated("tok_abc-123", "2026-09-27T10:00:00Z") }
     var stopSharingHandler: suspend (String) -> Unit = {}
 
-    override suspend fun signUp(email: String, password: String, firstName: String, lastName: String) {
+    override suspend fun signUp(email: String, password: String, firstName: String, lastName: String, acceptedPrivacyPolicy: Boolean, acceptedTerms: Boolean) {
         calls += "signUp"
+        lastSignUpConsent = acceptedPrivacyPolicy to acceptedTerms
         signUpHandler(email, password, firstName, lastName)
     }
     override suspend fun signIn(email: String, password: String) {

@@ -126,7 +126,7 @@ class CrossClientIntegrationTest {
         val okHttp = Network.okHttp(tokens)
         val api = ApiClient(Network.service(base!!, okHttp), tokens, ColdStartTracker(System::currentTimeMillis), AppJson, CoroutineScope(Dispatchers.IO))
         val app = RemoteBackend(api, tokens)
-        app.signUp(email, password, "Cross", "Client")
+        app.signUp(email, password, "Cross", "Client", acceptedPrivacyPolicy = true, acceptedTerms = true)
 
         try {
             // --- The website signs in with the same email and password.

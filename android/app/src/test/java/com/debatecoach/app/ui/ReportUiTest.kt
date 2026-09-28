@@ -1,6 +1,9 @@
 package com.debatecoach.app.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -35,6 +38,7 @@ import com.debatecoach.app.testing.session
 import com.debatecoach.app.ui.theme.DebateCoachTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -78,98 +82,147 @@ class ReportUiTest {
         ),
     )
 
-    private fun viewModel(): Pair<SessionViewModel, FakeBackend> {
+    private fun viewModel(r: SessionReport = report): Pair<SessionViewModel, FakeBackend> {
         val backend = FakeBackend().apply {
             getSessionHandler = { session(it) }
-            reportHandler = { report }
+            reportHandler = { r }
         }
         return SessionViewModel(backend, "s1", "https://web-debate-coach1.vercel.app") to backend
     }
 
-    private fun scrollTo(text: String) {
-        compose.onNodeWithTag("session-screen").performScrollToNode(hasText(text, substring = true))
+    private fun show(vm: SessionViewModel, onDeleted: () -> Unit = {}) {
+        compose.setContent { DebateCoachTheme { SessionContent(vm, onBack = {}, onDeleted = onDeleted) } }
+        compose.waitUntil(5_000) { vm.state.value.report != null }
+        compose.waitForIdle()
+    }
+
+    private fun openTab(tag: String) {
+        compose.onNodeWithTag("tab-$tag").performClick()
+        compose.waitForIdle()
+    }
+
+    /** Scrolls the current tab's list to the node with this text. */
+    private fun scrollTo(list: String, text: String, substring: Boolean = false) {
+        compose.onNodeWithTag(list).performScrollToNode(hasText(text, substring = substring))
     }
 
     @Test
-    fun shows_everything_the_websites_report_shows() {
+    fun the_header_shows_the_name_and_overall_score() {
         val (vm, _) = viewModel()
-        compose.setContent { DebateCoachTheme { SessionContent(vm, onBack = {}) } }
-        compose.waitUntil(5_000) { vm.state.value.report != null }
+        show(vm)
+        compose.onAllNodesWithText("Second constructive").onFirst().assertIsDisplayed()
+        compose.onNodeWithContentDescription("Overall score 68 out of 100").assertIsDisplayed()
+        compose.onAllNodesWithText("Recorded", substring = true).onFirst().assertIsDisplayed()
+    }
 
-        compose.onNodeWithText("Second constructive").assertIsDisplayed()
+    @Test
+    fun overview_has_the_prompt_scores_figures_and_timeline() {
+        val (vm, _) = viewModel()
+        show(vm)
         compose.onNodeWithTag("report-meta").assertIsDisplayed()
         compose.onNodeWithText("Motion: This house would introduce a carbon tax.", substring = true).assertIsDisplayed()
         compose.onNodeWithText(MOTION_NOT_APPLIED_NOTE, substring = true).assertIsDisplayed()
 
-        for (value in listOf("Overall, out of 100", "68", "142", "1:58", "Filler words", "Stutters")) {
-            scrollTo(value)
+        scrollTo("overview", "Not scored: nothing to rebut")
+        compose.onNodeWithText("Not scored: nothing to rebut").assertIsDisplayed()
+
+        for (value in listOf("142", "Words per minute", "1:58", "Filler words", "Stutters")) {
+            scrollTo("overview", value)
             compose.onNodeWithText(value).assertIsDisplayed()
         }
-
-        scrollTo("Where each finding landed")
+        scrollTo("overview", "Where each finding landed")
         compose.onNodeWithTag("speech-track").assertIsDisplayed()
         for (legend in listOf("Pause over one second", "Filler word", "Stutter")) {
-            scrollTo(legend)
+            scrollTo("overview", legend)
             compose.onNodeWithText(legend).assertIsDisplayed()
         }
-
-        for (text in listOf("Visual delivery", "Facing the camera", "62%", "High confidence")) {
-            scrollTo(text)
-            compose.onNodeWithText(text).assertIsDisplayed()
-        }
-        scrollTo("Camera calibration was skipped, so facing measurements are less certain.")
-        scrollTo("Looked down for 2.4s")
-        compose.onNodeWithText("0:42–0:55. Claim").assertIsDisplayed()
-
-        scrollTo("Not scored: nothing to rebut")
-        compose.onNodeWithText("Not scored: nothing to rebut").assertIsDisplayed()
     }
 
     @Test
-    fun findings_filter_by_category_in_severity_order() {
+    fun findings_filter_by_category_in_severity_order_and_expand() {
         val (vm, _) = viewModel()
-        compose.setContent { DebateCoachTheme { SessionContent(vm, onBack = {}) } }
-        compose.waitUntil(5_000) { vm.state.value.report != null }
+        show(vm)
+        compose.onNodeWithText("Findings (3)").assertIsDisplayed()
+        openTab("findings")
 
-        scrollTo("All 3")
         // Every finding is reachable, most severe first.
-        for (title in listOf("Claims without warrants", "Signposting", "Steady pace")) scrollTo(title)
+        for (title in listOf("Claims without warrants", "Signposting", "Steady pace")) scrollTo("findings", title)
 
-        scrollTo("All 3")
         compose.onNodeWithTag("filter-structure").performClick()
         compose.waitForIdle()
-        scrollTo("Signposting")
-        compose.onNodeWithText("Structure. Worth fixing.").assertIsDisplayed()
+        scrollTo("findings", "Signposting")
+        compose.onNodeWithText("Worth fixing").assertIsDisplayed()
         // Filtered out: no longer anywhere in the list.
-        assertThrows(AssertionError::class.java) { scrollTo("Claims without warrants") }
-        assertThrows(AssertionError::class.java) { scrollTo("Steady pace") }
-        scrollTo("All 3")
+        assertThrows(AssertionError::class.java) { scrollTo("findings", "Claims without warrants") }
+        assertThrows(AssertionError::class.java) { scrollTo("findings", "Steady pace") }
 
         compose.onNodeWithTag("filter-all").performClick()
         compose.waitForIdle()
-        scrollTo("Claims without warrants")
-        compose.onNodeWithText("Argumentation. Needs work.").assertIsDisplayed()
+        scrollTo("findings", "Claims without warrants")
+        compose.onNodeWithText("Needs work").assertIsDisplayed()
+        // Evidence and advice show once the card is expanded.
+        compose.onNodeWithText("It is simply better.").assertDoesNotExist()
+        compose.onNodeWithText("Claims without warrants").performClick()
+        compose.waitForIdle()
+        scrollTo("findings", "It is simply better.", substring = true)
         compose.onNodeWithText("It is simply better.").assertIsDisplayed()
+        compose.onNodeWithText("Add a because.").assertIsDisplayed()
     }
 
     @Test
-    fun share_creates_a_link_to_the_website_and_can_stop() {
-        val (vm, backend) = viewModel()
-        compose.setContent { DebateCoachTheme { SessionContent(vm, onBack = {}) } }
-        compose.waitUntil(5_000) { vm.state.value.report != null }
+    fun the_visual_tab_has_delivery_and_key_moments() {
+        val (vm, _) = viewModel()
+        show(vm)
+        openTab("visual")
+        for (text in listOf("Visual delivery", "Facing the camera", "62%", "High confidence")) {
+            scrollTo("visual", text)
+            compose.onNodeWithText(text).assertIsDisplayed()
+        }
+        scrollTo("visual", "Camera calibration was skipped, so facing measurements are less certain.")
+        scrollTo("visual", "Looked down for 2.4s", substring = true)
+        compose.onNodeWithText("0:42–0:55. Claim").assertIsDisplayed()
+    }
 
-        scrollTo("Only you can see this report.")
+    @Test
+    fun no_visual_tab_without_visual_data() {
+        val (vm, _) = viewModel(report.copy(videoAnalysisStatus = "not_requested", videoAnalysis = null, correlatedMoments = null, visualCoachingStatus = "not_requested"))
+        show(vm)
+        compose.onNodeWithTag("tab-overview").assertIsDisplayed()
+        compose.onNodeWithTag("tab-findings").assertIsDisplayed()
+        compose.onNodeWithTag("tab-visual").assertDoesNotExist()
+    }
+
+    @Test
+    fun share_sheet_creates_a_link_to_the_website_and_can_stop() {
+        val (vm, backend) = viewModel()
+        show(vm)
+        compose.onNodeWithTag("share-button").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Only you can see this report.").assertIsDisplayed()
         compose.onNodeWithTag("create-share").performClick()
         compose.waitUntil(5_000) { backend.calls.contains("createShare") }
         compose.waitForIdle()
-        scrollTo("https://web-debate-coach1.vercel.app/shared/tok_abc-123")
+        compose.onNodeWithText("https://web-debate-coach1.vercel.app/shared/tok_abc-123").assertIsDisplayed()
         compose.onNodeWithText("Anyone with this link can view this report").assertIsDisplayed()
-        compose.onNodeWithText("Copy link").assertIsDisplayed()
+        for (action in listOf("Copy link", "Share via…", "Create new link", "Stop sharing")) compose.onNodeWithText(action).assertIsDisplayed()
 
-        compose.onNodeWithTag("session-screen").performScrollToNode(hasTestTag("stop-share"))
         compose.onNodeWithTag("stop-share").performClick()
         compose.waitUntil(5_000) { backend.calls.contains("stopSharing") }
         compose.waitForIdle()
-        scrollTo("Only you can see this report.")
+        compose.onNodeWithText("Only you can see this report.").assertIsDisplayed()
+    }
+
+    @Test
+    fun the_overflow_menu_exports_and_deletes() {
+        val (vm, backend) = viewModel()
+        var deleted = false
+        show(vm, onDeleted = { deleted = true })
+        compose.onNodeWithTag("overflow").performClick()
+        compose.onNodeWithText("Export as PDF").assertIsDisplayed()
+        compose.onNodeWithTag("delete-session").performClick()
+        compose.onNodeWithText("Delete this session?").assertIsDisplayed()
+        compose.onNodeWithTag("confirm-delete").performClick()
+        compose.waitUntil(5_000) { deleted }
+        assertTrue(backend.calls.contains("deleteSession:s1"))
     }
 }

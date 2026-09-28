@@ -13,70 +13,103 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.progressBarRangeInfo
-import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -88,26 +121,23 @@ import com.debatecoach.app.BuildConfig
 import com.debatecoach.app.core.model.Motion
 import com.debatecoach.app.core.util.ConsentChoice
 import com.debatecoach.app.core.util.formatClock
-import com.debatecoach.app.feature.home.OfflineBanner
-import com.debatecoach.app.navigation.openUrl
-import com.debatecoach.app.ui.components.Alert
-import com.debatecoach.app.ui.components.AudioPlayer
-import com.debatecoach.app.ui.components.ButtonRow
-import com.debatecoach.app.ui.components.Field
-import com.debatecoach.app.ui.components.FilterChip
+import com.debatecoach.app.ui.components.DcCard
 import com.debatecoach.app.ui.components.Icons
-import com.debatecoach.app.ui.components.LinkButton
-import com.debatecoach.app.ui.components.Note
-import com.debatecoach.app.ui.components.Panel
-import com.debatecoach.app.ui.components.PrimaryButton
-import com.debatecoach.app.ui.components.QuietButton
-import com.debatecoach.app.ui.components.SectionTitle
+import com.debatecoach.app.ui.components.InlineMessage
+import com.debatecoach.app.ui.components.OfflineBanner
+import com.debatecoach.app.ui.components.StatusChip
+import com.debatecoach.app.ui.components.TextInput
 import com.debatecoach.app.ui.components.ThinProgress
 import com.debatecoach.app.ui.components.Tone
+import com.debatecoach.app.ui.components.AudioPlayerControls
 import com.debatecoach.app.ui.components.appViewModel
+import com.debatecoach.app.ui.components.openInApp
+import com.debatecoach.app.ui.components.rememberAudioController
 import com.debatecoach.app.ui.theme.Dc
-import com.debatecoach.app.ui.theme.Serif
+import com.debatecoach.app.ui.theme.Space
+import com.debatecoach.app.ui.theme.numberStyle
 import com.debatecoach.app.visual.UnavailableReason
+import kotlin.math.roundToInt
 
 @Composable
 fun RecorderScreen(container: AppContainer, onClose: () -> Unit, onUploaded: (String) -> Unit) {
@@ -132,8 +162,8 @@ fun RecorderScreen(container: AppContainer, onClose: () -> Unit, onUploaded: (St
 fun RecorderContent(vm: RecorderViewModel, online: Boolean, onClose: () -> Unit, onUploaded: (String) -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     val upload by vm.uploadState.collectAsStateWithLifecycle()
-    val c = Dc.colors
     val view = LocalView.current
+    var confirmDiscard by rememberSaveable { mutableStateOf(false) }
 
     // The screen stays on while the camera or microphone is live, so a
     // recording isn't cut short by the display timing out.
@@ -165,61 +195,98 @@ fun RecorderContent(vm: RecorderViewModel, online: Boolean, onClose: () -> Unit,
         }
     }
 
-    // Back during a recording stops it rather than silently discarding it.
+    // Back during a recording stops it rather than silently discarding
+    // it; back from review asks before throwing a recording away.
     BackHandler(enabled = state.phase == Phase.RECORDING) { vm.stopRecording() }
+    BackHandler(enabled = state.phase == Phase.REVIEW) { confirmDiscard = true }
 
+    AnimatedContent(
+        targetState = if (state.phase == Phase.UPLOADING) Phase.REVIEW else state.phase,
+        transitionSpec = { (fadeIn(tween(220, delayMillis = 60)) + scaleIn(tween(220, delayMillis = 60), initialScale = 0.97f)) togetherWith fadeOut(tween(90)) },
+        label = "recorder-phase",
+    ) { phase ->
+        when (phase) {
+            Phase.IDLE -> IdleStep(vm, state, online, onClose)
+            Phase.CONSENT -> ConsentStep(onDecide = vm::decideConsent)
+            Phase.SETUP -> SetupStep(vm, state, onClose)
+            Phase.RECORDING -> RecordingStep(vm, state)
+            Phase.REVIEW, Phase.UPLOADING -> ReviewStep(vm, state, upload, online, onDiscard = { confirmDiscard = true })
+        }
+    }
+
+    if (confirmDiscard) {
+        AlertDialog(
+            onDismissRequest = { confirmDiscard = false },
+            title = { Text("Discard this recording?") },
+            text = { Text("It hasn't been sent, so it will be lost.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDiscard = false
+                        vm.discard()
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.testTag("confirm-discard"),
+                ) { Text("Discard") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text("Keep") } },
+        )
+    }
+}
+
+// ---------------------------------------------------------------
+// Shared scaffolding: a focused screen with a bottom action area
+// ---------------------------------------------------------------
+
+@Composable
+private fun StepScaffold(
+    title: String,
+    navigationIcon: ImageVector?,
+    onNavigate: () -> Unit,
+    navigationLabel: String,
+    bottom: @Composable ColumnScope.() -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     Scaffold(
-        containerColor = c.paper,
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             TopAppBar(
-                title = { Text("Record", style = MaterialTheme.typography.titleLarge) },
+                title = { Text(title) },
                 navigationIcon = {
-                    IconButton(onClick = { if (state.phase == Phase.RECORDING) vm.stopRecording() else onClose() }) {
-                        Icon(Icons.Back, contentDescription = "Back")
-                    }
+                    if (navigationIcon != null) IconButton(onClick = onNavigate) { Icon(navigationIcon, contentDescription = navigationLabel) }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = c.paper),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
             )
         },
-    ) { padding ->
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Column(Modifier.widthIn(max = 560.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                OfflineBanner(online)
-                state.error?.let { Alert(it, Modifier.testTag("recorder-error")) }
-                AnimatedContent(
-                    targetState = state.phase,
-                    transitionSpec = { fadeIn() togetherWith fadeOut() },
-                    label = "phase",
-                ) { phase ->
-                    when (phase) {
-                        Phase.IDLE -> IdlePanel(vm, state)
-                        Phase.CONSENT -> ConsentPanel(onDecide = vm::decideConsent)
-                        Phase.SETUP -> SetupPanel(vm, state)
-                        Phase.RECORDING -> RecordingPanel(vm, state)
-                        Phase.REVIEW, Phase.UPLOADING -> ReviewPanel(vm, state, upload)
-                    }
-                }
+        bottomBar = {
+            Surface(color = MaterialTheme.colorScheme.surface) {
+                Column(
+                    Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = Space.xl, vertical = Space.l),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
+                    content = bottom,
+                )
             }
+        },
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding).imePadding(), contentAlignment = Alignment.TopCenter) {
+            Column(
+                Modifier.widthIn(max = 560.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Space.xl, vertical = Space.s),
+                verticalArrangement = Arrangement.spacedBy(Space.l),
+                content = content,
+            )
         }
     }
 }
 
 // ---------------------------------------------------------------
-// Idle
+// Idle: choose a prompt, check the setting, start
 // ---------------------------------------------------------------
 
 private enum class Ask { NONE, MIC_WHY, MIC_BLOCKED, CAMERA_WHY }
 
 @Composable
-private fun IdlePanel(vm: RecorderViewModel, state: RecorderState) {
+private fun IdleStep(vm: RecorderViewModel, state: RecorderState, online: Boolean, onClose: () -> Unit) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     var ask by remember { mutableStateOf(Ask.NONE) }
@@ -246,36 +313,67 @@ private fun IdlePanel(vm: RecorderViewModel, state: RecorderState) {
         }
     }
 
-    Panel {
-        SectionTitle("Record a speech")
-        Note(
-            buildString {
-                append("Speak as you would in a round. Debate Coach will ask for microphone access the first time.")
-                if (state.videoFeatureEnabled && state.consent == ConsentChoice.IN) append(" Visual feedback is on.")
-                if (state.videoFeatureEnabled && state.consent == ConsentChoice.OUT) append(" Visual feedback is off.")
-            },
+    StepScaffold(
+        title = "",
+        navigationIcon = Icons.Close,
+        onNavigate = onClose,
+        navigationLabel = "Close",
+        bottom = {
+            RoundActionButton(
+                icon = Icons.Mic,
+                label = "Start recording",
+                color = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError,
+                onClick = { if (granted(context, Manifest.permission.RECORD_AUDIO)) afterMic() else ask = Ask.MIC_WHY },
+                tag = "start-recording",
+            )
+        },
+    ) {
+        OfflineBanner(online)
+        state.error?.let { InlineMessage(it, tone = Tone.CRITICAL, modifier = Modifier.testTag("recorder-error")) }
+        Text("Record a speech", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
+        Text(
+            "Speak as you would in a round. Debate Coach will ask for microphone access the first time.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         MotionPicker(state.motions, state.motionId, vm::setMotion, loadFailed = state.motionsFailed)
-        if (ask == Ask.MIC_BLOCKED) {
-            Alert("Microphone access was blocked. Allow it for Debate Coach in your phone's settings, then try again.")
-            if (micPermanentlyDenied) QuietButton("Open settings", { openAppSettings(context) })
-        }
-        ButtonRow {
-            PrimaryButton(
-                "Start recording",
-                onClick = {
-                    if (granted(context, Manifest.permission.RECORD_AUDIO)) afterMic() else ask = Ask.MIC_WHY
-                },
-                modifier = Modifier.testTag("start-recording"),
-            )
-            if (state.videoFeatureEnabled && state.consent != null) {
-                QuietButton("Change visual feedback setting", vm::changeConsent)
+        if (state.videoFeatureEnabled) {
+            DcCard(padding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                ListItem(
+                    headlineContent = { Text("Visual feedback") },
+                    supportingContent = {
+                        Text(
+                            when (state.consent) {
+                                ConsentChoice.IN -> "Visual feedback is on."
+                                ConsentChoice.OUT -> "Visual feedback is off."
+                                null -> "You'll be asked when you start."
+                            },
+                        )
+                    },
+                    leadingContent = { Icon(Icons.Camera, contentDescription = null) },
+                    trailingContent = if (state.consent != null) {
+                        { TextButton(onClick = vm::changeConsent, modifier = Modifier.testTag("change-consent")) { Text("Change") } }
+                    } else {
+                        null
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
             }
+        }
+        if (ask == Ask.MIC_BLOCKED) {
+            InlineMessage(
+                "Microphone access was blocked. Allow it for Debate Coach in your phone's settings, then try again.",
+                tone = Tone.CRITICAL,
+                actionLabel = if (micPermanentlyDenied) "Settings" else null,
+                onAction = if (micPermanentlyDenied) ({ openAppSettings(context) }) else null,
+            )
         }
     }
 
     when (ask) {
         Ask.MIC_WHY -> PermissionDialog(
+            icon = Icons.Mic,
             title = "Microphone",
             text = "Debate Coach records your speech with the microphone, then sends the recording for analysis. It only listens while you are recording.",
             onContinue = {
@@ -285,6 +383,7 @@ private fun IdlePanel(vm: RecorderViewModel, state: RecorderState) {
             onCancel = { ask = Ask.NONE },
         )
         Ask.CAMERA_WHY -> PermissionDialog(
+            icon = Icons.Camera,
             title = "Camera",
             text = "Visual feedback looks at your camera while you record. Only numbers describing movement leave this phone; no video is recorded, uploaded or saved. If you say no, the session records audio only.",
             onContinue = {
@@ -300,15 +399,40 @@ private fun IdlePanel(vm: RecorderViewModel, state: RecorderState) {
     }
 }
 
+/** A large round action (record, stop), labelled underneath. */
 @Composable
-private fun PermissionDialog(title: String, text: String, onContinue: () -> Unit, onCancel: () -> Unit) {
+private fun RoundActionButton(icon: ImageVector, label: String, color: Color, contentColor: Color, onClick: () -> Unit, tag: String, square: Boolean = false) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Surface(
+            onClick = onClick,
+            shape = CircleShape,
+            color = color,
+            contentColor = contentColor,
+            shadowElevation = 2.dp,
+            modifier = Modifier.size(80.dp).semantics { contentDescription = label }.testTag(tag),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                if (square) {
+                    Box(Modifier.size(26.dp).clip(MaterialTheme.shapes.extraSmall).background(contentColor))
+                } else {
+                    Icon(icon, contentDescription = null, modifier = Modifier.size(34.dp))
+                }
+            }
+        }
+        Spacer(Modifier.height(Space.s))
+        Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun PermissionDialog(icon: ImageVector, title: String, text: String, onContinue: () -> Unit, onCancel: () -> Unit) {
     AlertDialog(
         onDismissRequest = onCancel,
+        icon = { Icon(icon, contentDescription = null) },
         title = { Text(title) },
         text = { Text(text) },
-        confirmButton = { PrimaryButton("Continue", onContinue, modifier = Modifier.testTag("permission-continue")) },
-        dismissButton = { QuietButton("Not now", onCancel) },
-        containerColor = Dc.colors.paperRaised,
+        confirmButton = { TextButton(onClick = onContinue, modifier = Modifier.testTag("permission-continue")) { Text("Continue") } },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Not now") } },
     )
 }
 
@@ -330,46 +454,57 @@ fun openAppSettings(context: Context) {
     runCatching { context.startActivity(intent) }
 }
 
-/** components/MotionPicker.tsx: "No prompt" by default, the motion's wording underneath. */
+/** components/MotionPicker.tsx as a native dropdown: "No prompt" by default, the motion's wording underneath. */
 @Composable
 fun MotionPicker(motions: List<Motion>, value: String?, onChange: (String?) -> Unit, enabled: Boolean = true, loadFailed: Boolean = false) {
-    val c = Dc.colors
     var expanded by remember { mutableStateOf(false) }
     val chosen = motions.firstOrNull { it.id == value }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Practice prompt (optional)", style = MaterialTheme.typography.labelMedium, color = c.ink)
+    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { if (enabled) expanded = it }) {
             OutlinedTextField(
                 value = chosen?.title ?: "No prompt",
                 onValueChange = {},
                 readOnly = true,
                 enabled = enabled,
+                singleLine = true,
+                label = { Text("Practice prompt (optional)") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled)
-                    .semantics { contentDescription = "Practice prompt: ${chosen?.title ?: "No prompt"}" }
                     .testTag("motion-picker"),
                 shape = MaterialTheme.shapes.small,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = c.pine,
-                    unfocusedBorderColor = c.ruleStrong,
-                    focusedContainerColor = c.paperRaised,
-                    unfocusedContainerColor = c.paperRaised,
-                ),
             )
-            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, containerColor = c.paperRaised) {
-                DropdownMenuItem(text = { Text("No prompt") }, onClick = { onChange(null); expanded = false })
+            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                DropdownMenuItem(text = { Text("No prompt") }, onClick = { onChange(null); expanded = false }, contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding)
                 motions.forEach { m ->
-                    DropdownMenuItem(text = { Text(m.title) }, onClick = { onChange(m.id); expanded = false }, modifier = Modifier.testTag("motion-${m.id}"))
+                    DropdownMenuItem(
+                        text = { Text(m.title) },
+                        onClick = { onChange(m.id); expanded = false },
+                        contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                        modifier = Modifier.testTag("motion-${m.id}"),
+                    )
                 }
             }
         }
         if (chosen != null) {
-            Note("${chosen.description} Your coaching will also judge how well you address it.")
+            MotionCard(chosen, "Your coaching will also judge how well you address it.")
         } else if (loadFailed) {
-            Note("Practice prompts could not be loaded. You can still record without one.")
+            Text("Practice prompts could not be loaded. You can still record without one.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+}
+
+/** The motion's wording as a card, kept on screen while recording. */
+@Composable
+private fun MotionCard(motion: Motion, note: String? = null) {
+    Column(
+        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.secondaryContainer).padding(Space.l),
+        verticalArrangement = Arrangement.spacedBy(Space.xs),
+    ) {
+        Text("Motion", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
+        Text(motion.description, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
+        if (note != null) Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
     }
 }
 
@@ -378,28 +513,58 @@ fun MotionPicker(motions: List<Motion>, value: String?, onChange: (String?) -> U
 // ---------------------------------------------------------------
 
 @Composable
-fun ConsentPanel(onDecide: (ConsentChoice) -> Unit) {
+fun ConsentStep(onDecide: (ConsentChoice) -> Unit) {
     val context = LocalContext.current
-    Panel {
-        SectionTitle("Visual feedback (optional)")
-        Note("Debate Coach can also look at your camera while you record, in addition to your audio.")
-        Definition("What is measured", "Which way your head faces, whether you're facing the camera, and where your hands are and how much they move.")
-        Definition("What is not done", "No video is recorded, uploaded, or saved. No identity recognition. No emotion detection.")
-        Definition("What leaves this device", "Numbers describing movement over time, plus your audio, the same as it does today.")
-        Definition("One more thing", "The on-device vision library this uses (Google MediaPipe) sends its own usage and performance statistics to Google. See MediaPipe's privacy notice.")
-        LinkButton("MediaPipe's privacy notice", { openUrl(context, "https://goo.gle/mediapipe-privacy") })
-        ButtonRow {
-            PrimaryButton("Turn on visual feedback", { onDecide(ConsentChoice.IN) }, modifier = Modifier.testTag("consent-in"))
-            QuietButton("Continue with audio only", { onDecide(ConsentChoice.OUT) }, modifier = Modifier.testTag("consent-out"))
+    val toolbar = com.debatecoach.app.ui.components.customTabToolbarColor()
+    StepScaffold(
+        title = "",
+        navigationIcon = null,
+        onNavigate = {},
+        navigationLabel = "",
+        bottom = {
+            Button(
+                onClick = { onDecide(ConsentChoice.IN) },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("consent-in"),
+            ) { Text("Turn on visual feedback") }
+            TextButton(onClick = { onDecide(ConsentChoice.OUT) }, modifier = Modifier.fillMaxWidth().heightIn(min = Space.touch).testTag("consent-out")) {
+                Text("Continue with audio only")
+            }
+        },
+    ) {
+        Box(
+            Modifier.size(56.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.Camera, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer) }
+        Text("Visual feedback (optional)", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
+        Text(
+            "Debate Coach can also look at your camera while you record, in addition to your audio.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            Definition(Icons.Waveform, "What is measured", "Which way your head faces, whether you're facing the camera, and where your hands are and how much they move.")
+            Definition(Icons.Lock, "What is not done", "No video is recorded, uploaded, or saved. No identity recognition. No emotion detection.")
+            Definition(Icons.Share, "What leaves this device", "Numbers describing movement over time, plus your audio, the same as it does today.")
+            Definition(Icons.Info, "One more thing", "The on-device vision library this uses (Google MediaPipe) sends its own usage and performance statistics to Google. See MediaPipe's privacy notice.")
         }
+        ListItem(
+            headlineContent = { Text("MediaPipe's privacy notice", color = MaterialTheme.colorScheme.primary) },
+            trailingContent = { Icon(Icons.OpenInNew, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier.clip(MaterialTheme.shapes.small).clickable { openInApp(context, "https://goo.gle/mediapipe-privacy", toolbar) },
+        )
     }
 }
 
 @Composable
-fun Definition(term: String, definition: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(term, style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold), color = Dc.colors.ink)
-        Text(definition, style = MaterialTheme.typography.bodyMedium, color = Dc.colors.inkSoft)
+private fun Definition(icon: ImageVector, term: String, definition: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = Space.s).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.Top) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp).size(20.dp))
+        Spacer(Modifier.width(Space.l))
+        Column {
+            Text(term, style = MaterialTheme.typography.titleSmall)
+            Text(definition, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -426,7 +591,11 @@ fun unavailableMessage(reason: UnavailableReason?): String = when (reason) {
 
 @Composable
 private fun CameraPreview(vm: RecorderViewModel, modifier: Modifier) {
-    val capture = vm.capture as? AndroidVisualCapture ?: return
+    val capture = vm.capture as? AndroidVisualCapture
+    if (capture == null) {
+        Box(modifier.clip(MaterialTheme.shapes.large).background(MaterialTheme.colorScheme.surfaceContainerHighest))
+        return
+    }
     val context = LocalContext.current
     val previewView = remember {
         PreviewView(context).apply {
@@ -441,204 +610,364 @@ private fun CameraPreview(vm: RecorderViewModel, modifier: Modifier) {
     AndroidView(
         factory = { previewView },
         modifier = modifier
-            .clip(MaterialTheme.shapes.small)
-            .background(Dc.colors.well)
+            .clip(MaterialTheme.shapes.large)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .semantics { contentDescription = "Camera preview" },
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SetupPanel(vm: RecorderViewModel, state: RecorderState) {
+private fun SetupStep(vm: RecorderViewModel, state: RecorderState, onClose: () -> Unit) {
     val setup = state.setup
     val capture = vm.capture
     val framing = capture?.framing?.collectAsStateWithLifecycle()?.value
     val hands = capture?.handsInView?.collectAsStateWithLifecycle()?.value ?: false
     val haptics = LocalHapticFeedback.current
 
-    Panel {
-        if (setup.step == SetupStep.UNAVAILABLE) {
-            Note(unavailableMessage(setup.unavailable))
-            PrimaryButton("Continue with audio only", vm::continueAudioOnly, modifier = Modifier.testTag("audio-only"))
-            return@Panel
+    if (setup.step == SetupStep.UNAVAILABLE) {
+        StepScaffold(
+            title = "",
+            navigationIcon = Icons.Close,
+            onNavigate = onClose,
+            navigationLabel = "Close",
+            bottom = {
+                Button(onClick = vm::continueAudioOnly, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("audio-only")) { Text("Continue with audio only") }
+            },
+        ) {
+            com.debatecoach.app.ui.components.EmptyState(Icons.Camera, "Audio only this time", unavailableMessage(setup.unavailable))
         }
+        return
+    }
 
-        if (capture != null) CameraPreview(vm, Modifier.fillMaxWidth().aspectRatio(3f / 4f).heightIn(max = 420.dp))
-
-        when (setup.step) {
-            SetupStep.STARTING -> Note("Starting the camera.")
-            SetupStep.FRAMING -> {
-                val f = framing
-                SectionTitle("Framing")
-                Definition("Face", if (f?.faceVisible == true) "Visible" else "Not clearly visible yet")
-                Definition("Distance", if (f?.distance == "ok") "Good" else DISTANCE_HINT[f?.distance ?: "too_far"].orEmpty())
-                Definition("Lighting", if (f == null || f.lighting == "ok") "Good" else LIGHTING_HINT[f.lighting].orEmpty())
-                Definition("Hands", if (hands) "Both in view" else "Raise both hands to check they're in the frame")
-                val ready = f != null && f.faceVisible && f.distance == "ok" && f.lighting == "ok"
-                ButtonRow {
-                    PrimaryButton("Continue", vm::framingContinue, enabled = ready, modifier = Modifier.testTag("framing-continue"))
-                    QuietButton("Skip visual feedback", { vm.skipVisual() })
-                }
-            }
-            SetupStep.BENCHMARK -> {
-                SectionTitle("Checking this device")
-                Note(
-                    "A brief check to see how much analysis this device can keep up with." +
-                        if (setup.benchmarkFps > 0) " Last run: ~${setup.benchmarkFps.toInt()} frames/sec." else "",
-                )
-                ButtonRow {
-                    PrimaryButton(if (setup.busy) "Checking." else "Run check", vm::runBenchmark, enabled = !setup.busy)
-                    QuietButton("Skip visual feedback", { vm.skipVisual() }, enabled = !setup.busy)
-                }
-            }
-            SetupStep.CALIBRATE_GAZE -> {
-                SectionTitle(setup.deviceTier?.let { "Device ready (${it.replace("_", " ")} tracking)" } ?: "Look at the camera")
-                Note("Look directly at your camera lens, not the screen, for three seconds. This sets the baseline for \"facing the camera\" during your speech.")
-                ButtonRow {
-                    PrimaryButton(if (setup.busy) "Reading." else "Start", vm::runGazeCalibration, enabled = !setup.busy)
-                    QuietButton("Skip", vm::skipGazeCalibration, enabled = !setup.busy)
-                }
-            }
-            SetupStep.CALIBRATE_HAND -> {
-                SectionTitle("Raise your right hand")
-                Note("Just for a couple of seconds, so gestures get attributed to the right side.")
-                ButtonRow {
-                    PrimaryButton(if (setup.busy) "Checking." else "Start", vm::runRightHandCheck, enabled = !setup.busy)
-                    QuietButton("Skip", vm::skipCalibration, enabled = !setup.busy)
-                }
-            }
-            SetupStep.CONTEXT -> {
-                SectionTitle("A couple of questions")
-                Note("Where will your audience be?")
-                Choice("Watching this camera (online or recorded)", setup.setting == "camera_audience") { vm.setSetting("camera_audience") }
-                Choice("In the room with me", setup.setting == "in_room_practice") { vm.setSetting("in_room_practice") }
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp)
-                        .toggleable(value = setup.usesNotes, role = Role.Checkbox, onValueChange = vm::setUsesNotes),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(checked = setup.usesNotes, onCheckedChange = null, colors = CheckboxDefaults.colors(checkedColor = Dc.colors.pine))
-                    Text("I'm using notes", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 8.dp))
-                }
-                PrimaryButton("Continue", vm::contextContinue)
-            }
-            SetupStep.READY -> {
-                SectionTitle("Ready")
-                Note(
-                    (if (setup.calibration.performed) "Calibration complete. " else "Recording without calibration; gaze tracking will be less precise. ") +
-                        "You can start whenever you're ready.",
-                )
-                PrimaryButton(
-                    "Start recording",
-                    {
+    val ready = framing != null && framing.faceVisible && framing.distance == "ok" && framing.lighting == "ok"
+    StepScaffold(
+        title = "Set up the camera",
+        navigationIcon = Icons.Close,
+        onNavigate = { vm.skipVisual() },
+        navigationLabel = "Skip visual feedback",
+        bottom = {
+            when (setup.step) {
+                SetupStep.FRAMING -> SetupActions("Continue", vm::framingContinue, enabled = ready, tag = "framing-continue", skip = "Skip visual feedback" to { vm.skipVisual() })
+                SetupStep.BENCHMARK -> SetupActions(if (setup.busy) "Checking." else "Run check", vm::runBenchmark, enabled = !setup.busy, skip = "Skip visual feedback" to { vm.skipVisual() }, skipEnabled = !setup.busy)
+                SetupStep.CALIBRATE_GAZE -> SetupActions(if (setup.busy) "Reading." else "Start", vm::runGazeCalibration, enabled = !setup.busy, skip = "Skip" to vm::skipGazeCalibration, skipEnabled = !setup.busy)
+                SetupStep.CALIBRATE_HAND -> SetupActions(if (setup.busy) "Checking." else "Start", vm::runRightHandCheck, enabled = !setup.busy, skip = "Skip" to vm::skipCalibration, skipEnabled = !setup.busy)
+                SetupStep.CONTEXT -> SetupActions("Continue", vm::contextContinue)
+                SetupStep.READY -> RoundActionButton(
+                    icon = Icons.Mic,
+                    label = "Start recording",
+                    color = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                    onClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.Confirm)
                         vm.setupReady()
                     },
-                    modifier = Modifier.testTag("setup-start"),
+                    tag = "setup-start",
                 )
+                else -> Unit
             }
+        },
+    ) {
+        if (capture != null) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
+                CameraPreview(vm, Modifier.fillMaxWidth().aspectRatio(3f / 4f).heightIn(max = 460.dp))
+                if (setup.step == SetupStep.FRAMING) {
+                    FlowRow(
+                        Modifier.fillMaxWidth().padding(Space.m),
+                        horizontalArrangement = Arrangement.spacedBy(Space.s, Alignment.CenterHorizontally),
+                        verticalArrangement = Arrangement.spacedBy(Space.s),
+                    ) {
+                        CheckChip("Face", framing?.faceVisible == true)
+                        CheckChip("Distance", framing?.distance == "ok")
+                        CheckChip("Lighting", framing == null || framing.lighting == "ok")
+                        CheckChip("Hands", hands)
+                    }
+                }
+            }
+        }
+        when (setup.step) {
+            SetupStep.STARTING -> StepText("Starting the camera", null)
+            SetupStep.FRAMING -> {
+                val f = framing
+                val hint = when {
+                    f == null || !f.faceVisible -> "Centre your face in the frame."
+                    f.distance != "ok" -> DISTANCE_HINT[f.distance].orEmpty()
+                    f.lighting != "ok" -> LIGHTING_HINT[f.lighting].orEmpty()
+                    !hands -> "Raise both hands to check they're in the frame."
+                    else -> "Looking good."
+                }
+                StepText("Framing", hint)
+            }
+            SetupStep.BENCHMARK -> StepText(
+                "Checking this device",
+                "A brief check to see how much analysis this device can keep up with." +
+                    if (setup.benchmarkFps > 0) " Last run: ~${setup.benchmarkFps.toInt()} frames/sec." else "",
+            )
+            SetupStep.CALIBRATE_GAZE -> StepText(
+                setup.deviceTier?.let { "Device ready (${it.replace("_", " ")} tracking)" } ?: "Look at the camera",
+                "Look directly at your camera lens, not the screen, for three seconds. This sets the baseline for \"facing the camera\" during your speech.",
+            )
+            SetupStep.CALIBRATE_HAND -> StepText("Raise your right hand", "Just for a couple of seconds, so gestures get attributed to the right side.")
+            SetupStep.CONTEXT -> {
+                StepText("A couple of questions", "Where will your audience be?")
+                Column {
+                    Choice("Watching this camera (online or recorded)", setup.setting == "camera_audience") { vm.setSetting("camera_audience") }
+                    Choice("In the room with me", setup.setting == "in_room_practice") { vm.setSetting("in_room_practice") }
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = Space.touch).clip(MaterialTheme.shapes.small)
+                            .toggleable(value = setup.usesNotes, role = Role.Checkbox, onValueChange = vm::setUsesNotes),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = setup.usesNotes, onCheckedChange = null)
+                        Spacer(Modifier.width(Space.m))
+                        Text("I'm using notes", style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+            }
+            SetupStep.READY -> StepText(
+                "Ready",
+                (if (setup.calibration.performed) "Calibration complete. " else "Recording without calibration; gaze tracking will be less precise. ") +
+                    "You can start whenever you're ready.",
+            )
             SetupStep.UNAVAILABLE -> Unit
         }
     }
 }
 
 @Composable
-private fun Choice(label: String, selected: Boolean, onSelect: () -> Unit) {
+private fun StepText(title: String, body: String?) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.xs), modifier = Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }) {
+        Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
+        if (body != null) Text(body, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun ColumnScope.SetupActions(
+    label: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    tag: String? = null,
+    skip: Pair<String, () -> Unit>? = null,
+    skipEnabled: Boolean = true,
+) {
+    Button(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).let { if (tag != null) it.testTag(tag) else it }) { Text(label) }
+    if (skip != null) {
+        TextButton(onClick = skip.second, enabled = skipEnabled, modifier = Modifier.fillMaxWidth().heightIn(min = Space.touch)) { Text(skip.first) }
+    }
+}
+
+/** A framing check over the camera preview: a tick when it's right. */
+@Composable
+private fun CheckChip(label: String, ok: Boolean) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(selected = selected, role = Role.RadioButton, onClick = onSelect),
+        Modifier
+            .clip(MaterialTheme.shapes.small)
+            .background(if (ok) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.78f))
+            .padding(horizontal = Space.m, vertical = Space.xs)
+            .semantics(mergeDescendants = true) { contentDescription = "$label: ${if (ok) "good" else "not yet"}" },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = selected, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = Dc.colors.pine))
-        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 8.dp))
+        Icon(
+            if (ok) Icons.Check else Icons.Info,
+            contentDescription = null,
+            tint = if (ok) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.inverseOnSurface,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(Space.xs))
+        Text(label, style = MaterialTheme.typography.labelLarge, color = if (ok) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.inverseOnSurface)
+    }
+}
+
+@Composable
+private fun Choice(label: String, selected: Boolean, onSelect: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = Space.touch).clip(MaterialTheme.shapes.small).selectable(selected = selected, role = Role.RadioButton, onClick = onSelect),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(Space.m))
+        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
 // ---------------------------------------------------------------
-// Recording
+// Recording: focused, immersive
 // ---------------------------------------------------------------
 
 @Composable
-private fun RecordingPanel(vm: RecorderViewModel, state: RecorderState) {
-    val c = Dc.colors
+private fun RecordingStep(vm: RecorderViewModel, state: RecorderState) {
     val haptics = LocalHapticFeedback.current
     val faceMissing = vm.capture?.faceMissingSeconds?.collectAsStateWithLifecycle()?.value ?: 0.0
-    Panel {
-        state.chosenMotion?.let { Note(it.description, color = c.inkSoft) }
-        Text(
-            formatClock(state.elapsedSeconds.toDouble()),
-            fontFamily = Serif,
-            style = MaterialTheme.typography.displayMedium,
-            color = c.ink,
-            modifier = Modifier.semantics { contentDescription = "Recording, ${state.elapsedSeconds} seconds" }.testTag("timer"),
-        )
-        // The level meter: confirms the microphone is actually hearing you.
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(6.dp)
-                .clip(MaterialTheme.shapes.extraSmall)
-                .background(c.well)
-                .semantics { progressBarRangeInfo = ProgressBarRangeInfo(state.level / 100f, 0f..1f); contentDescription = "Microphone level" },
-        ) {
-            Box(Modifier.fillMaxWidth(state.level / 100f).height(6.dp).background(c.pine))
+    Scaffold(containerColor = MaterialTheme.colorScheme.surface) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            Column(
+                Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = Space.xl, vertical = Space.l),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                // The status line: a pulsing dot, and the camera toggle.
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    RecordingDot()
+                    Spacer(Modifier.width(Space.s))
+                    Text(
+                        "Recording in progress.",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                    if (state.usingVideo) {
+                        IconButton(onClick = vm::togglePreview, modifier = Modifier.testTag("toggle-preview")) {
+                            Icon(Icons.Camera, contentDescription = if (state.showPreview) "Hide camera preview" else "Show camera preview")
+                        }
+                    }
+                }
+                state.chosenMotion?.let {
+                    Spacer(Modifier.height(Space.l))
+                    MotionCard(it)
+                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    formatClock(state.elapsedSeconds.toDouble()),
+                    style = numberStyle(80.sp),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.semantics { contentDescription = "Recording, ${state.elapsedSeconds} seconds" }.testTag("timer"),
+                )
+                Spacer(Modifier.height(Space.xl))
+                LevelMeter(state.level)
+                AnimatedVisibility(state.usingVideo && faceMissing > 0) {
+                    StatusChip("Your face isn't in view.", tone = Tone.CAUTION, icon = Icons.Warning, modifier = Modifier.padding(top = Space.l))
+                }
+                Spacer(Modifier.weight(1f))
+                RoundActionButton(
+                    icon = Icons.Stop,
+                    label = "Stop recording",
+                    color = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                        vm.stopRecording()
+                    },
+                    tag = "stop-recording",
+                    square = true,
+                )
+                Spacer(Modifier.navigationBarsPadding())
+            }
+            // The camera, picture-in-picture, when visual feedback is on.
+            AnimatedVisibility(
+                state.usingVideo && state.showPreview,
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 64.dp, end = Space.l),
+                enter = fadeIn() + scaleIn(initialScale = 0.9f),
+                exit = fadeOut(),
+            ) {
+                CameraPreview(vm, Modifier.width(112.dp).aspectRatio(3f / 4f).border(2.dp, MaterialTheme.colorScheme.surface, MaterialTheme.shapes.large))
+            }
         }
-        Text("Recording in progress.", modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodySmall, color = c.inkFaint)
-        if (state.usingVideo && faceMissing > 0) Note("Your face isn't in view.")
-        if (state.usingVideo) {
-            FilterChip(if (state.showPreview) "Hide camera preview" else "Show camera preview", state.showPreview, vm::togglePreview)
-            if (state.showPreview) CameraPreview(vm, Modifier.fillMaxWidth(0.45f).aspectRatio(3f / 4f))
-        }
-        PrimaryButton(
-            "Stop recording",
-            {
-                haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-                vm.stopRecording()
-            },
-            tone = Tone.DANGER,
-            modifier = Modifier.fillMaxWidth().testTag("stop-recording"),
-        )
     }
 }
+
+@Composable
+private fun RecordingDot() {
+    val transition = rememberInfiniteTransition(label = "rec")
+    val alpha by transition.animateFloat(1f, 0.25f, infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "rec-alpha")
+    val color = MaterialTheme.colorScheme.error
+    Canvas(Modifier.size(12.dp)) { drawCircle(color.copy(alpha = alpha)) }
+}
+
+/**
+ * The live level meter: recent levels as bars, newest on the right, so
+ * you can see the microphone hearing you. Announced as a progress bar.
+ */
+@Composable
+private fun LevelMeter(level: Int) {
+    val history = remember { mutableStateListOf<Float>().apply { repeat(BARS) { add(0f) } } }
+    LaunchedEffect(level) {
+        history.removeAt(0)
+        history.add(level / 100f)
+    }
+    val color = MaterialTheme.colorScheme.primary
+    val track = MaterialTheme.colorScheme.surfaceContainerHighest
+    Canvas(
+        Modifier
+            .fillMaxWidth()
+            .widthIn(max = 360.dp)
+            .height(56.dp)
+            .semantics {
+                progressBarRangeInfo = ProgressBarRangeInfo(level / 100f, 0f..1f)
+                contentDescription = "Microphone level"
+            }
+            .testTag("level-meter"),
+    ) {
+        val gap = 3.dp.toPx()
+        val w = (size.width - gap * (BARS - 1)) / BARS
+        history.forEachIndexed { i, v ->
+            val h = (size.height * (0.08f + 0.92f * v.coerceIn(0f, 1f)))
+            val x = i * (w + gap)
+            drawRoundRect(track, Offset(x, 0f), Size(w, size.height), CornerRadius(w / 2))
+            drawRoundRect(color, Offset(x, (size.height - h) / 2), Size(w, h), CornerRadius(w / 2))
+        }
+    }
+}
+
+private const val BARS = 28
 
 // ---------------------------------------------------------------
 // Review and upload
 // ---------------------------------------------------------------
 
 @Composable
-private fun ReviewPanel(vm: RecorderViewModel, state: RecorderState, upload: UploadState) {
+private fun ReviewStep(vm: RecorderViewModel, state: RecorderState, upload: UploadState, online: Boolean, onDiscard: () -> Unit) {
     val uploading = state.phase == Phase.UPLOADING
     val haptics = LocalHapticFeedback.current
-    Panel {
-        SectionTitle("Recording of ${formatClock(state.recordedSeconds)}")
-        state.interruption?.let { Alert(it.message(), quiet = true) }
-        state.recordingFile?.let { AudioPlayer(Uri.fromFile(it)) }
-        MotionPicker(state.motions, state.motionId, vm::setMotion, enabled = !uploading, loadFailed = state.motionsFailed)
-        Field(
+    StepScaffold(
+        title = "Review",
+        navigationIcon = Icons.Close,
+        onNavigate = { if (!uploading) onDiscard() },
+        navigationLabel = "Discard",
+        bottom = {
+            if (uploading && upload is UploadState.Running) {
+                Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }, verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    Row {
+                        Text("${upload.step.label}.", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                        upload.progress?.let { Text("${(it * 100).roundToInt()}%", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    }
+                    ThinProgress(upload.progress)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.m), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = onDiscard,
+                    enabled = !uploading,
+                    modifier = Modifier.weight(1f).heightIn(min = 52.dp).testTag("discard-recording"),
+                ) { Text("Discard") }
+                Button(
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                        vm.submit()
+                    },
+                    enabled = !uploading,
+                    modifier = Modifier.weight(1f).heightIn(min = 52.dp).testTag("submit-recording"),
+                ) { Text(if (uploading) "Uploading" else "Upload") }
+            }
+        },
+    ) {
+        OfflineBanner(online)
+        state.error?.let { InlineMessage(it, tone = Tone.CRITICAL, modifier = Modifier.testTag("recorder-error")) }
+        Text("Recording of ${formatClock(state.recordedSeconds)}", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
+        state.interruption?.let { InlineMessage(it.message()) }
+        state.recordingFile?.let { file ->
+            val audio = rememberAudioController(Uri.fromFile(file))
+            DcCard { AudioPlayerControls(audio) }
+        }
+        TextInput(
             "Name this session (optional)",
             state.title,
             vm::setTitle,
             placeholder = "Second constructive, nuclear energy",
             enabled = !uploading,
             maxLength = 200,
+            tag = "title-field",
         )
-        if (uploading && upload is UploadState.Running) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
-                Note("${upload.step.label}.")
-                ThinProgress(upload.progress)
-            }
-        }
-        ButtonRow {
-            PrimaryButton(
-                if (uploading) "Sending" else "Analyse this speech",
-                {
-                    haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-                    vm.submit()
-                },
-                enabled = !uploading,
-                modifier = Modifier.testTag("submit-recording"),
-            )
-            QuietButton("Record again", vm::discard, enabled = !uploading, modifier = Modifier.testTag("discard-recording"))
-        }
+        MotionPicker(state.motions, state.motionId, vm::setMotion, enabled = !uploading, loadFailed = state.motionsFailed)
     }
 }
+

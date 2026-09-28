@@ -10,6 +10,7 @@ import com.debatecoach.app.core.net.NetworkException
 import com.debatecoach.app.core.net.UNREACHABLE_MESSAGE
 import com.debatecoach.app.feature.account.AccountViewModel
 import com.debatecoach.app.feature.auth.AuthViewModel
+import com.debatecoach.app.feature.auth.CONSENT_REQUIRED_MESSAGE
 import com.debatecoach.app.feature.progress.ProgressViewModel
 import com.debatecoach.app.feature.progress.buildChart
 import com.debatecoach.app.feature.progress.describeChart
@@ -17,6 +18,7 @@ import com.debatecoach.app.feature.report.SESSION_POLL_MS
 import com.debatecoach.app.feature.report.SessionViewModel
 import com.debatecoach.app.feature.report.ShareUi
 import com.debatecoach.app.feature.sessions.POLL_MS
+import com.debatecoach.app.feature.sessions.SessionsEvent
 import com.debatecoach.app.feature.sessions.SessionsViewModel
 import com.debatecoach.app.feature.sessions.rowMeta
 import com.debatecoach.app.testing.FakeBackend
@@ -24,6 +26,7 @@ import com.debatecoach.app.testing.MainDispatcherRule
 import com.debatecoach.app.testing.session
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
@@ -46,6 +49,52 @@ class AuthViewModelTest {
         vm.submit()
         assertEquals("Use a password of at least 8 characters.", vm.state.value.error)
         assertTrue(backend.calls.isEmpty())
+    }
+
+    @Test
+    fun `sign-up needs both boxes ticked before calling the server, then sends both`() = runTest(main.dispatcher) {
+        val backend = FakeBackend()
+        val vm = AuthViewModel(backend, signup = true)
+        vm.update { copy(email = "a@example.com", password = "long enough", firstName = "A", lastName = "B") }
+        assertFalse(vm.state.value.consentGiven)
+        vm.submit()
+        assertTrue(vm.state.value.consentError)
+        assertTrue(backend.calls.isEmpty())
+
+        vm.update { copy(acceptedPrivacyPolicy = true) }
+        vm.submit()
+        assertTrue(backend.calls.isEmpty())
+
+        vm.update { copy(acceptedTerms = true) }
+        assertFalse("ticking both clears the explanation", vm.state.value.consentError)
+        vm.submit()
+        advanceUntilIdle()
+        assertEquals(listOf("signUp"), backend.calls)
+        assertEquals(true to true, backend.lastSignUpConsent)
+        assertTrue(vm.state.value.done)
+    }
+
+    @Test
+    fun `the backend's consent refusal is shown as is`() = runTest(main.dispatcher) {
+        val backend = FakeBackend().apply { signUpHandler = { _, _, _, _ -> throw ApiException(422, CONSENT_REQUIRED_MESSAGE) } }
+        val vm = AuthViewModel(backend, signup = true)
+        vm.update { copy(email = "a@example.com", password = "long enough", firstName = "A", lastName = "B", acceptedPrivacyPolicy = true, acceptedTerms = true) }
+        vm.submit()
+        advanceUntilIdle()
+        assertEquals(CONSENT_REQUIRED_MESSAGE, vm.state.value.error)
+    }
+
+    @Test
+    fun `the form survives the process being killed, except the password`() = runTest(main.dispatcher) {
+        val saved = androidx.lifecycle.SavedStateHandle()
+        val vm = AuthViewModel(FakeBackend(), signup = true, saved)
+        vm.update { copy(email = "a@example.com", password = "secret123", firstName = "Ada", lastName = "L", acceptedPrivacyPolicy = true) }
+        val restored = AuthViewModel(FakeBackend(), signup = true, saved).state.value
+        assertEquals("a@example.com", restored.email)
+        assertEquals("Ada", restored.firstName)
+        assertTrue(restored.acceptedPrivacyPolicy)
+        assertFalse(restored.acceptedTerms)
+        assertEquals("", restored.password)
     }
 
     @Test
@@ -111,31 +160,77 @@ class SessionsViewModelTest {
     }
 
     @Test
-    fun `delete asks first, then removes the row, with the web's messages on failure`() = runTest(main.dispatcher) {
+    fun `swipe delete hides the row at once and only deletes when the undo window closes`() = runTest(main.dispatcher) {
+        val backend = FakeBackend().apply { sessionsHandler = { listOf(session("s1"), session("s2")) } }
+        val vm = SessionsViewModel(backend)
+        val events = mutableListOf<SessionsEvent>()
+        val collector = backgroundScope.launch { vm.events.collect { events += it } }
+        runCurrent()
+        vm.load()
+
+        vm.deleteWithUndo(vm.state.value.visible!!.first())
+        runCurrent()
+        assertEquals(listOf("s2"), vm.state.value.visible!!.map { it.id })
+        assertEquals("s1", (events.single() as SessionsEvent.Deleted).session.id)
+        assertTrue("nothing sent while Undo is on offer", backend.calls.none { it.startsWith("deleteSession") })
+
+        vm.commitDelete()
+        advanceUntilIdle()
+        assertEquals(listOf("deleteSession:s1"), backend.calls.filter { it.startsWith("deleteSession") })
+        assertEquals(listOf("s2"), vm.state.value.visible!!.map { it.id })
+        assertNull(vm.state.value.pendingDelete)
+        collector.cancel()
+    }
+
+    @Test
+    fun `undo brings the row back and sends nothing`() = runTest(main.dispatcher) {
         val backend = FakeBackend().apply { sessionsHandler = { listOf(session("s1"), session("s2")) } }
         val vm = SessionsViewModel(backend)
         vm.load()
-        vm.askDelete(vm.state.value.sessions!!.first())
-        assertEquals("s1", vm.state.value.confirmDelete?.id)
-        vm.cancelDelete()
+        vm.deleteWithUndo(vm.state.value.visible!!.first())
+        vm.undoDelete()
+        vm.commitDelete() // the snackbar going away after Undo: a no-op
+        advanceUntilIdle()
+        assertEquals(listOf("s1", "s2"), vm.state.value.visible!!.map { it.id })
         assertTrue(backend.calls.none { it.startsWith("deleteSession") })
+    }
 
-        vm.askDelete(vm.state.value.sessions!!.first())
-        vm.confirmDelete()
-        advanceUntilIdle()
-        assertEquals(listOf("s2"), vm.state.value.sessions!!.map { it.id })
+    @Test
+    fun `a polled refresh doesn't bring a pending delete back`() = runTest(main.dispatcher) {
+        val backend = FakeBackend().apply { sessionsHandler = { listOf(session("s1"), session("s2")) } }
+        val vm = SessionsViewModel(backend)
+        vm.load()
+        vm.deleteWithUndo(vm.state.value.visible!!.first())
+        vm.load()
+        assertEquals(listOf("s2"), vm.state.value.visible!!.map { it.id })
+        assertEquals("the completed count ignores it too", 1, vm.state.value.completedCount)
+    }
 
-        backend.deleteSessionHandler = { throw ApiException(404, "Not found") }
-        vm.askDelete(vm.state.value.sessions!!.first())
-        vm.confirmDelete()
-        advanceUntilIdle()
-        assertEquals("That session was already gone.", vm.state.value.deleteError)
+    @Test
+    fun `a failed delete restores the row, with the website's messages`() = runTest(main.dispatcher) {
+        val backend = FakeBackend().apply { sessionsHandler = { listOf(session("s1"), session("s2")) } }
+        val vm = SessionsViewModel(backend)
+        val events = mutableListOf<SessionsEvent>()
+        val collector = backgroundScope.launch { vm.events.collect { events += it } }
+        runCurrent()
+        vm.load()
 
         backend.deleteSessionHandler = { throw ApiException(409, "still analysing") }
-        vm.askDelete(vm.state.value.sessions!!.first())
-        vm.confirmDelete()
+        vm.deleteWithUndo(vm.state.value.visible!!.first())
+        vm.commitDelete()
         advanceUntilIdle()
-        assertEquals("Could not delete that session. Try again.", vm.state.value.deleteError)
+        runCurrent() // advanceUntilIdle leaves background work (the collector) for runCurrent
+        assertEquals(listOf("s1", "s2"), vm.state.value.visible!!.map { it.id })
+        assertEquals("Could not delete that session. Try again.", events.filterIsInstance<SessionsEvent.Message>().last().text)
+
+        backend.deleteSessionHandler = { throw ApiException(404, "Not found") }
+        vm.deleteWithUndo(vm.state.value.visible!!.first())
+        vm.commitDelete()
+        advanceUntilIdle()
+        runCurrent()
+        assertEquals(listOf("s2"), vm.state.value.visible!!.map { it.id })
+        assertEquals("That session was already gone.", events.filterIsInstance<SessionsEvent.Message>().last().text)
+        collector.cancel()
     }
 
     @Test
@@ -292,6 +387,28 @@ class SessionViewModelTest {
         vm.createShareLink()
         advanceUntilIdle()
         assertEquals("Could not create a share link. Try again.", vm.state.value.shareError)
+    }
+
+    @Test
+    fun `delete from the report's menu, with the website's messages`() = runTest(main.dispatcher) {
+        val backend = FakeBackend().apply { deleteSessionHandler = { throw ApiException(409, "still analysing") } }
+        val vm = SessionViewModel(backend, "s1", "https://web.example")
+        vm.delete()
+        advanceUntilIdle()
+        assertEquals("Could not delete that session. Try again.", vm.state.value.deleteError)
+        assertFalse(vm.state.value.deleted)
+
+        backend.deleteSessionHandler = {}
+        vm.delete()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.deleted)
+        assertEquals(2, backend.calls.count { it == "deleteSession:s1" })
+
+        // Already gone elsewhere (the website): still leaves the report.
+        val gone = SessionViewModel(FakeBackend().apply { deleteSessionHandler = { throw ApiException(404, "Not found") } }, "s2", "https://web.example")
+        gone.delete()
+        advanceUntilIdle()
+        assertTrue(gone.state.value.deleted)
     }
 }
 

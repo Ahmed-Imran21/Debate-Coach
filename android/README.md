@@ -4,6 +4,31 @@ A native Android app (Kotlin, Jetpack Compose, Material 3) for the same
 backend, account and data as the website. Everything the website does,
 except the admin panel and the profile page.
 
+## Structure
+
+The website's brand (colours, Newsreader and IBM Plex Sans, its calm
+tone) on Android's own structure:
+
+- **Navigation**: four destinations in a bottom bar on phones, a
+  navigation rail on tablets: *Sessions*, *Progress* (the graph),
+  *Insights* (the AI progress report) and *Account*. Record is the
+  Sessions screen's floating button (the rail's button on tablets).
+  On large tablets Sessions shows the list and a report side by side.
+- **Screens**: each destination has a large, collapsing top bar;
+  secondary actions sit in its overflow menu. A report has a collapsing
+  header (name and overall score) and Overview / Findings / Visual tabs,
+  with sharing and PDF export in bottom sheets and a mini-player that
+  follows key moments. The recorder is a focused full-screen flow.
+- **Motion**: a container transform from a session's row into its
+  report, fade through between tabs, the recorder rising from the
+  bottom; predictive back throughout.
+- **Deep links**: `debatecoach://sessions`, `://session/<id>`,
+  `://record`, `://progress`, `://insights`, `://account`; a *Record*
+  launcher shortcut while signed in.
+- **Design system**: `ui/theme/Theme.kt` (Material 3 colour roles in
+  light and dark, type scale, `Space`, `Radius`, `Elevation`, `Motion`,
+  window size classes) and `ui/components/`.
+
 ## Builds
 
 Two flavours, both installable side by side as debug APKs:
@@ -19,6 +44,14 @@ cd android
 ./gradlew assembleProductionDebug
 # -> app/build/outputs/apk/{local,production}/debug/*.apk
 ```
+
+Each build also makes one APK per processor family (`arm64-v8a` for
+current phones, `armeabi-v7a` for older 32-bit ones, `x86_64` for
+emulators and Chromebooks) and a `universal` one that runs anywhere.
+
+`-PsideBySide=true` gives the build its own app id (`….redesign`), name
+("Debate Coach (new)") and deep-link scheme (`debatecoach-new://`), so it
+installs next to another build of the app for comparison.
 
 Put `localApiUrl=...` in `~/.gradle/gradle.properties` to stop passing it.
 The local build allows plain HTTP (your LAN backend); production is HTTPS
@@ -53,6 +86,8 @@ the live backend. If the backend ever turns it off, build with
 parity/check-goldens.sh                        # regenerate web-parity goldens and check them
 DC_BACKEND_URL=http://localhost:8000 DC_TEST_AUDIO=/path/speech.m4a \
   ./gradlew :app:testLocalDebugUnitTest --tests '*CrossClient*'   # website and app, one account
+./gradlew :app:testLocalDebugUnitTest --tests '*Screenshots*' -PscreenshotsDir=/tmp/shots
+                                               # every screen to PNG, light and dark, for review
 ```
 
 ## Web parity for the visual signals
@@ -68,5 +103,5 @@ JavaScript's number semantics differ from Kotlin's (V8's `Math.hypot`,
 `Math.round`, the ordering of signed zeros, `Number::toString`),
 `JsMath` reproduces JavaScript's.
 
-The app labels its tracks `source.platform: "android"`, which needs the
-backend change in `visual_analysis/schema.py` on this branch.
+The app labels its tracks `source.platform: "android"`, which the live
+backend accepts.
