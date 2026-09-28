@@ -287,9 +287,14 @@ code {
   color: #f6f8f5;
 }
 
-.btn:disabled {
+.btn:disabled,
+.btn[aria-disabled="true"] {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.btn[aria-disabled="true"]:hover {
+  background: var(--pine);
 }
 
 .btn-quiet {
@@ -364,6 +369,32 @@ code {
 
 .field input:focus-visible {
   border-color: var(--pine);
+}
+
+/* Sign-up consent: a checkbox and one line of text, the whole line
+   (except its link) toggling the box. */
+.consent {
+  display: flex;
+  gap: 0.625rem;
+  align-items: flex-start;
+  margin-bottom: 0.875rem;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.consent input {
+  flex: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0.125rem 0 0;
+  accent-color: var(--pine);
+  cursor: pointer;
+}
+
+.consent-group {
+  margin: 1.375rem 0 1.25rem;
 }
 
 .form-panel {

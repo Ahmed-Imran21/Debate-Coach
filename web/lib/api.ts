@@ -427,6 +427,8 @@ export async function signup(input: {
   password: string;
   first_name: string;
   last_name: string;
+  accepted_privacy_policy: boolean;
+  accepted_terms: boolean;
 }): Promise<Tokens> {
   const tokens = await request<Tokens>("/v1/auth/signup", {
     method: "POST",

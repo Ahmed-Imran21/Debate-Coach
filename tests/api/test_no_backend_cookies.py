@@ -24,7 +24,7 @@ def client(app_module, db, fake_storage, fake_jobs, video_flag, monkeypatch):
 
 @pytest.mark.parametrize("email", ["boss@test.com", "someone@test.com"])
 def test_signup_login_and_refresh_set_no_cookie(client, email):
-    body = {"email": email, "password": "CorrectHorse1", "first_name": "A", "last_name": "B"}
+    body = {"email": email, "password": "CorrectHorse1", "first_name": "A", "last_name": "B", "accepted_privacy_policy": True, "accepted_terms": True}
 
     signup = client.post("/v1/auth/signup", json=body)
     login = client.post("/v1/auth/login", json={"email": email, "password": "CorrectHorse1"})

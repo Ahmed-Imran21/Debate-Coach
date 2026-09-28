@@ -23,7 +23,7 @@ def client(app_module, db, fake_storage, fake_jobs, video_flag):
 
 
 def _signup(client, email="u@test.com", password=PASSWORD, **overrides):
-    body = {"email": email, "password": password, "first_name": "A", "last_name": "B", **overrides}
+    body = {"email": email, "password": password, "first_name": "A", "last_name": "B", "accepted_privacy_policy": True, "accepted_terms": True, **overrides}
     return client.post("/v1/auth/signup", json=body)
 
 

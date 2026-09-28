@@ -54,6 +54,19 @@ class User(Base):
         nullable=True,
     )
 
+    # When this user ticked each sign-up box (migrations/0008). NULL
+    # for accounts created before the boxes existed: they aren't
+    # asked again.
+    privacy_policy_accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     # passive_deletes lets the database's ON DELETE CASCADE do
     # the work instead of SQLAlchemy loading every session row
     # into memory first.

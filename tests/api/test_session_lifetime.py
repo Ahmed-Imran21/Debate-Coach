@@ -50,7 +50,7 @@ def _refresh_token_with_session_start(user_id, age_days: float) -> str:
 def test_signup_and_login_each_mint_a_fresh_session_start(client, db):
     r = client.post(
         "/v1/auth/signup",
-        json={"email": "s@test.com", "password": "CorrectHorse1", "first_name": "A", "last_name": "B"},
+        json={"email": "s@test.com", "password": "CorrectHorse1", "first_name": "A", "last_name": "B", "accepted_privacy_policy": True, "accepted_terms": True},
     )
     assert r.status_code == 201, r.text
     signup_start = _decode(r.json()["refresh_token"])["session_start"]

@@ -71,7 +71,7 @@ describe("store paths sync, and are awaited", () => {
   it.each(["login", "signup"] as const)("%s syncs the new token before resolving", async (which) => {
     const { login, signup } = await api();
     if (which === "login") await login({ email: "a@test.com", password: "x" });
-    else await signup({ email: "a@test.com", password: "x", first_name: "A", last_name: "B" });
+    else await signup({ email: "a@test.com", password: "x", first_name: "A", last_name: "B", accepted_privacy_policy: true, accepted_terms: true });
 
     expect(sessionCalls()).toEqual([
       { url: "/api/session", method: "POST", auth: `Bearer ${FRESH}`, keepalive: undefined },

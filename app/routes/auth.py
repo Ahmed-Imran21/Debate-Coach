@@ -30,6 +30,11 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # email costs the same ~300ms bcrypt verify as a wrong password.
 _TIMING_EQUALIZER_HASH = "$2b$12$Fj0fpUtj14hdPYxjNXhGvuqbLt4mcpRmYSxoPwX1CnQXJ6bvMBGmu"
 
+# Shown as-is by the website and the app.
+SIGNUP_CONSENT_MESSAGE = (
+    "To create an account, agree to the Privacy Policy and the Terms and Conditions."
+)
+
 
 def _tokens_for(
     user: User,
@@ -62,6 +67,17 @@ def signup(
     db: Session = Depends(get_db),
 ) -> TokenResponse:
 
+    consents = (payload.accepted_privacy_policy, payload.accepted_terms)
+    refused = False in consents or (
+        settings.signup_consent_required and None in consents
+    )
+
+    if refused:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=SIGNUP_CONSENT_MESSAGE,
+        )
+
     email = payload.email.strip().lower()
 
     existing = (
@@ -76,11 +92,15 @@ def signup(
             detail="That email already has an account.",
         )
 
+    now = datetime.now(timezone.utc)
+
     user = User(
         email=email,
         password_hash=hash_password(payload.password),
         first_name=payload.first_name.strip(),
         last_name=payload.last_name.strip(),
+        privacy_policy_accepted_at=now if payload.accepted_privacy_policy else None,
+        terms_accepted_at=now if payload.accepted_terms else None,
     )
 
     db.add(user)

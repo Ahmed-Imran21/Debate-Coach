@@ -98,6 +98,17 @@ class Settings(BaseSettings):
     video_analysis_enabled: bool = False
 
     # ---------------------------------------------------------
+    # Sign-up consent
+    # ---------------------------------------------------------
+
+    # Sign-up must tick both the Privacy Policy and the Terms and
+    # Conditions boxes. False only for the rollout step in which the
+    # live website doesn't send them yet: a sign-up that leaves them
+    # out is then still allowed, but one that sends either as false
+    # is refused either way, and whatever is sent is recorded.
+    signup_consent_required: bool = True
+
+    # ---------------------------------------------------------
     # HTTP
     # ---------------------------------------------------------
 
